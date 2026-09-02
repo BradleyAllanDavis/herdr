@@ -836,6 +836,19 @@ pub struct WorktreesConfig {
     pub directory: String,
 }
 
+/// Border style applied to the focused pane, on top of the accent-color highlight,
+/// so the active pane is distinguishable without relying on color perception alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FocusedPaneBorderStyleConfig {
+    /// Same box-drawing weight as unfocused panes; only the accent color differs.
+    #[default]
+    Single,
+    /// Heavy box-drawing characters, so the focused pane's border reads as visibly
+    /// thicker than its neighbors' regardless of color contrast.
+    Thick,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TabBarPositionConfig {
@@ -942,6 +955,8 @@ pub struct UiConfig {
     pub pane_scrollbars: bool,
     /// Keep split panes visually separated instead of sharing divider borders. Default: true.
     pub pane_gaps: bool,
+    /// Border weight for the focused pane. Default: single.
+    pub focused_pane_border_style: FocusedPaneBorderStyleConfig,
     /// Show agent labels in split pane borders when no manual pane label is set. Default: false.
     pub show_agent_labels_on_pane_borders: bool,
     /// Hide the tab row when the workspace has one tab. Default: false.
@@ -1177,6 +1192,7 @@ impl Default for UiConfig {
             pane_outer_borders: true,
             pane_scrollbars: true,
             pane_gaps: true,
+            focused_pane_border_style: FocusedPaneBorderStyleConfig::Single,
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
@@ -1479,6 +1495,10 @@ status_indicators = "symbols"
         assert!(default_config.ui.pane_outer_borders);
         assert!(default_config.ui.pane_scrollbars);
         assert!(default_config.ui.pane_gaps);
+        assert_eq!(
+            default_config.ui.focused_pane_border_style,
+            FocusedPaneBorderStyleConfig::Single
+        );
         assert!(!default_config.ui.show_agent_labels_on_pane_borders);
         assert!(!default_config.ui.hide_tab_bar_when_single_tab);
         assert_eq!(
@@ -1494,6 +1514,7 @@ pane_borders = "always"
 pane_outer_borders = false
 pane_scrollbars = false
 pane_gaps = true
+focused_pane_border_style = "thick"
 show_agent_labels_on_pane_borders = true
 hide_tab_bar_when_single_tab = true
 tab_bar_position = "bottom"
@@ -1511,6 +1532,10 @@ tab_bar_right_separator = " · "
         assert!(!config.ui.pane_outer_borders);
         assert!(!config.ui.pane_scrollbars);
         assert!(config.ui.pane_gaps);
+        assert_eq!(
+            config.ui.focused_pane_border_style,
+            FocusedPaneBorderStyleConfig::Thick
+        );
         assert!(config.ui.show_agent_labels_on_pane_borders);
         assert!(config.ui.hide_tab_bar_when_single_tab);
         assert_eq!(config.ui.tab_bar_position, TabBarPositionConfig::Bottom);
