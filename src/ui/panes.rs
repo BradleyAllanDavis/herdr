@@ -434,7 +434,13 @@ fn render_pane_borders(
         let focused = pane_infos
             .iter()
             .any(|info| info.is_focused && line_touches_pane(x, y, info, app.pane_gaps));
-        let symbol = line_cell_symbol(line);
+        let thick = focused
+            && app.focused_pane_border_style == crate::config::FocusedPaneBorderStyleConfig::Thick;
+        let symbol = if thick {
+            line_cell_symbol_thick(line)
+        } else {
+            line_cell_symbol(line)
+        };
         if symbol.is_empty() {
             continue;
         }
@@ -643,6 +649,29 @@ fn line_cell_symbol(line: LineCell) -> &'static str {
         (false, true, true, false) => "┐",
         (true, false, false, true) => "└",
         (true, false, true, false) => "┘",
+        _ => "",
+    }
+}
+
+/// Same connectivity mapping as `line_cell_symbol`, using heavy box-drawing
+/// characters so a focused pane's border reads as thicker than its neighbors'.
+fn line_cell_symbol_thick(line: LineCell) -> &'static str {
+    match (line.up, line.down, line.left, line.right) {
+        (true, true, true, true) => "╋",
+        (true, true, true, false) => "┫",
+        (true, true, false, true) => "┣",
+        (true, false, true, true) => "┻",
+        (false, true, true, true) => "┳",
+        (true, true, false, false) | (true, false, false, false) | (false, true, false, false) => {
+            "┃"
+        }
+        (false, false, true, true) | (false, false, true, false) | (false, false, false, true) => {
+            "━"
+        }
+        (false, true, false, true) => "┏",
+        (false, true, true, false) => "┓",
+        (true, false, false, true) => "┗",
+        (true, false, true, false) => "┛",
         _ => "",
     }
 }
@@ -1036,6 +1065,86 @@ mod tests {
         assert_eq!(buffer[(2, 2)].style().fg, Some(app.palette.accent));
         assert_eq!(buffer[(2, 1)].symbol(), "│");
         assert_eq!(buffer[(2, 1)].style().fg, Some(app.palette.accent));
+    }
+
+    #[test]
+    fn thick_focused_pane_border_style_only_thickens_focused_cells() {
+        let mut app = AppState::test_new();
+        app.focused_pane_border_style = crate::config::FocusedPaneBorderStyleConfig::Thick;
+        app.view.terminal_area = Rect::new(0, 0, 4, 4);
+        app.view.pane_infos = vec![
+            PaneInfo {
+                id: PaneId::from_raw(1),
+                rect: Rect::new(0, 0, 2, 2),
+                inner_rect: Rect::default(),
+                scrollbar_rect: None,
+                borders: Borders::TOP | Borders::LEFT,
+                is_focused: true,
+            },
+            PaneInfo {
+                id: PaneId::from_raw(2),
+                rect: Rect::new(2, 0, 2, 2),
+                inner_rect: Rect::default(),
+                scrollbar_rect: None,
+                borders: Borders::TOP | Borders::LEFT | Borders::RIGHT,
+                is_focused: false,
+            },
+            PaneInfo {
+                id: PaneId::from_raw(3),
+                rect: Rect::new(0, 2, 2, 2),
+                inner_rect: Rect::default(),
+                scrollbar_rect: None,
+                borders: Borders::TOP | Borders::LEFT | Borders::BOTTOM,
+                is_focused: false,
+            },
+            PaneInfo {
+                id: PaneId::from_raw(4),
+                rect: Rect::new(2, 2, 2, 2),
+                inner_rect: Rect::default(),
+                scrollbar_rect: None,
+                borders: Borders::ALL,
+                is_focused: false,
+            },
+        ];
+        let split_borders = vec![
+            crate::layout::SplitBorder {
+                pos: 2,
+                direction: ratatui::layout::Direction::Horizontal,
+                ratio: 0.5,
+                area: Rect::new(0, 0, 4, 4),
+                path: vec![],
+            },
+            crate::layout::SplitBorder {
+                pos: 2,
+                direction: ratatui::layout::Direction::Vertical,
+                ratio: 0.5,
+                area: Rect::new(0, 0, 4, 4),
+                path: vec![false],
+            },
+        ];
+        let ws = Workspace::test_new("test");
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(4, 4)).unwrap();
+
+        terminal
+            .draw(|frame| render_view_pane_borders(&app, &ws, &split_borders, frame))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        // (2, 2) and (2, 1) touch the focused pane (see the thin-style equivalent
+        // test above) and must render with heavy box-drawing glyphs when the
+        // config opts into a thick focused border.
+        assert_eq!(buffer[(2, 2)].symbol(), "╋");
+        assert_eq!(buffer[(2, 2)].style().fg, Some(app.palette.accent));
+        assert_eq!(buffer[(2, 1)].symbol(), "┃");
+        assert_eq!(buffer[(2, 1)].style().fg, Some(app.palette.accent));
+        // (0, 0) is the focused pane's own top-left corner, entirely its own —
+        // must also come out heavy.
+        assert_eq!(buffer[(0, 0)].symbol(), "┏");
+        // A cell that never touches the focused pane keeps the thin glyph even
+        // though thick styling is enabled globally: (3, 3) is pane 4's own
+        // bottom-right corner, and pane 4 is not focused.
+        assert_eq!(buffer[(3, 3)].symbol(), "┘");
     }
 
     #[test]
