@@ -658,25 +658,46 @@ impl App {
         let Some(source_public_id) = self.public_pane_id(ws_idx, source_pane_id) else {
             return encode_error(id, "pane_not_found", "pane not found");
         };
-        let target =
+        let in_tab_target =
             self.directional_pane_target(ws_idx, tab_idx, source_pane_id, params.direction);
+        // Personal-fork addition (not upstream): falling off the left/right edge of a
+        // tab's pane layout crosses into the adjacent tab instead of stopping there,
+        // landing on that tab's far edge pane -- the rightmost pane of the previous
+        // tab when moving left, the leftmost pane of the next tab when moving right --
+        // so alt+h/alt+l read as one continuous strip across every tab, not just
+        // within the current one. Up/down never cross tabs; there's no spatial
+        // "tab above/below" relationship to follow. `pane neighbor`/`pane edges`
+        // (introspection endpoints) are deliberately untouched and stay strictly
+        // within-tab, since scripts (see modules/herdr's config-only fallback in
+        // dotfiles) rely on them to detect a tab-boundary case themselves.
+        let (target, target_tab_idx) = match in_tab_target {
+            Some(pane_id) => (Some(pane_id), tab_idx),
+            None => match params.direction {
+                PaneDirection::Left | PaneDirection::Right => self
+                    .adjacent_tab_entry_pane(ws_idx, tab_idx, params.direction)
+                    .map_or((None, tab_idx), |(next_tab_idx, pane_id)| {
+                        (Some(pane_id), next_tab_idx)
+                    }),
+                PaneDirection::Up | PaneDirection::Down => (None, tab_idx),
+            },
+        };
         let reason = target
             .is_none()
             .then_some(PaneFocusDirectionReason::NoNeighbor);
 
         if let Some(target_pane_id) = target {
             self.state.focus_pane_in_workspace(ws_idx, target_pane_id);
-            self.state.switch_workspace_tab(ws_idx, tab_idx);
+            self.state.switch_workspace_tab(ws_idx, target_tab_idx);
             self.state.mode = crate::app::Mode::Terminal;
         }
         let focused_pane_id = self
             .state
             .workspaces
             .get(ws_idx)
-            .and_then(|ws| ws.tabs.get(tab_idx))
+            .and_then(|ws| ws.tabs.get(target_tab_idx))
             .map(|tab| tab.layout.focused())
             .and_then(|pane_id| self.public_pane_id(ws_idx, pane_id));
-        let Some(layout) = self.pane_layout_snapshot(ws_idx, tab_idx) else {
+        let Some(layout) = self.pane_layout_snapshot(ws_idx, target_tab_idx) else {
             return encode_error(id, "pane_layout_unavailable", "pane layout unavailable");
         };
 
@@ -1999,6 +2020,41 @@ impl App {
         let panes = tab.layout.panes(self.state.view.terminal_area);
         let source = panes.iter().find(|pane| pane.id == source_pane_id)?;
         find_in_direction(source, direction.into(), &panes)
+    }
+
+    /// Personal-fork addition (not upstream): the entry pane in the tab adjacent to
+    /// `tab_idx` in `direction`, used by `handle_pane_focus_direction` to cross a tab
+    /// boundary once `directional_pane_target` finds no neighbor left inside the
+    /// current tab. Returns the target tab's index plus the pane that continues the
+    /// motion -- the rightmost pane of the previous tab when moving left, the
+    /// leftmost pane of the next tab when moving right. `direction` must be `Left`
+    /// or `Right`; any other value, an out-of-range tab, or an empty target tab
+    /// layout returns `None`.
+    fn adjacent_tab_entry_pane(
+        &self,
+        ws_idx: usize,
+        tab_idx: usize,
+        direction: PaneDirection,
+    ) -> Option<(usize, PaneId)> {
+        let ws = self.state.workspaces.get(ws_idx)?;
+        let next_tab_idx = match direction {
+            PaneDirection::Left => tab_idx.checked_sub(1)?,
+            PaneDirection::Right => {
+                let next = tab_idx.checked_add(1)?;
+                (next < ws.tabs.len()).then_some(next)?
+            }
+            PaneDirection::Up | PaneDirection::Down => return None,
+        };
+        let tab = ws.tabs.get(next_tab_idx)?;
+        let panes = tab.layout.panes(self.state.view.terminal_area);
+        let entry = match direction {
+            PaneDirection::Left => panes
+                .iter()
+                .max_by_key(|pane| pane.rect.x + pane.rect.width)?,
+            PaneDirection::Right => panes.iter().min_by_key(|pane| pane.rect.x)?,
+            PaneDirection::Up | PaneDirection::Down => return None,
+        };
+        Some((next_tab_idx, entry.id))
     }
 
     pub(super) fn pane_layout_snapshot(
@@ -4181,6 +4237,75 @@ mod tests {
         assert_eq!(focus.source_pane_id, root_public.clone());
         assert_eq!(focus.focused_pane_id, Some(root_public));
         assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(root));
+    }
+
+    #[test]
+    fn api_pane_focus_direction_crosses_into_adjacent_tab() {
+        let mut app = app_with_linked_worktree();
+        let first_root = app.state.workspaces[0].tabs[0].root_pane;
+        let second_tab_idx = app.state.workspaces[0].test_add_tab(Some("second"));
+        let second_root = app.state.workspaces[0].tabs[second_tab_idx].root_pane;
+        app.state.workspaces[0].tabs[0]
+            .layout
+            .focus_pane(first_root);
+        crate::ui::compute_view_with_runtime_registry(
+            &mut app.state,
+            &crate::terminal::TerminalRuntimeRegistry::new(),
+            ratatui::layout::Rect::new(0, 0, 100, 20),
+        );
+        let first_public = app.public_pane_id(0, first_root).unwrap();
+        let second_public = app.public_pane_id(0, second_root).unwrap();
+
+        let response = app.handle_pane_focus_direction(
+            "req".into(),
+            crate::api::schema::PaneFocusDirectionParams {
+                pane_id: Some(first_public.clone()),
+                direction: PaneDirection::Right,
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::PaneFocusDirection { focus } = success.result else {
+            panic!("expected pane focus direction response");
+        };
+        assert!(focus.changed);
+        assert_eq!(focus.reason, None);
+        assert_eq!(focus.source_pane_id, first_public);
+        assert_eq!(focus.focused_pane_id, Some(second_public));
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(second_root));
+        assert_eq!(app.state.workspaces[0].active_tab, second_tab_idx);
+    }
+
+    #[test]
+    fn api_pane_focus_direction_does_not_cross_tabs_vertically() {
+        let mut app = app_with_linked_worktree();
+        let first_root = app.state.workspaces[0].tabs[0].root_pane;
+        app.state.workspaces[0].test_add_tab(Some("second"));
+        app.state.workspaces[0].tabs[0]
+            .layout
+            .focus_pane(first_root);
+        crate::ui::compute_view_with_runtime_registry(
+            &mut app.state,
+            &crate::terminal::TerminalRuntimeRegistry::new(),
+            ratatui::layout::Rect::new(0, 0, 100, 20),
+        );
+        let first_public = app.public_pane_id(0, first_root).unwrap();
+
+        let response = app.handle_pane_focus_direction(
+            "req".into(),
+            crate::api::schema::PaneFocusDirectionParams {
+                pane_id: Some(first_public),
+                direction: PaneDirection::Down,
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::PaneFocusDirection { focus } = success.result else {
+            panic!("expected pane focus direction response");
+        };
+        assert!(!focus.changed);
+        assert_eq!(focus.reason, Some(PaneFocusDirectionReason::NoNeighbor));
+        assert_eq!(app.state.workspaces[0].active_tab, 0);
     }
 
     #[test]
