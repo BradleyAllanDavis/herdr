@@ -276,6 +276,50 @@ impl TileLayout {
         set_ratio_at(&mut self.root, path, ratio.clamp(0.1, 0.9))
     }
 
+    /// Equalize the widths of every column in the vertical-split ("side by
+    /// side") run that `target` belongs to. Called after adding or removing
+    /// a column so the run stays evenly divided; a no-op when `target` isn't
+    /// inside a `Direction::Horizontal` split (e.g. it's the tab's only
+    /// pane, or every ancestor split stacks panes vertically instead).
+    pub fn equalize_columns_containing(&mut self, target: PaneId) {
+        let Some(path) = horizontal_run_root(&self.root, target) else {
+            return;
+        };
+        if let Some(run_root) = node_at_mut(&mut self.root, &path) {
+            equalize_run(run_root);
+        }
+    }
+
+    /// Path to the `Direction::Horizontal` run `target` currently sits in
+    /// (see `equalize_columns_containing`). Capture this *before* removing
+    /// `target` so `equalize_columns_after_removal` can re-check the same
+    /// structural position afterward.
+    pub fn horizontal_run_path_containing(&self, target: PaneId) -> Option<Vec<bool>> {
+        horizontal_run_root(&self.root, target)
+    }
+
+    /// Re-equalize the run at `path` after a pane has been removed from it.
+    /// `path` must come from `horizontal_run_path_containing`, captured
+    /// before the removal. A no-op when the run collapsed entirely (fewer
+    /// than two columns remain there now) — re-checking the exact captured
+    /// position, rather than re-deriving membership from a surviving pane
+    /// id, is what keeps this from reaching into an unrelated nested split
+    /// that happens to still contain that pane.
+    pub fn equalize_columns_after_removal(&mut self, path: &[bool]) {
+        let Some(node) = node_at_mut(&mut self.root, path) else {
+            return;
+        };
+        if matches!(
+            node,
+            Node::Split {
+                direction: Direction::Horizontal,
+                ..
+            }
+        ) {
+            equalize_run(node);
+        }
+    }
+
     /// Adjust the nearest split in the given direction for the focused pane.
     /// `delta` is positive to grow, negative to shrink.
     pub fn resize_focused(&mut self, nav: NavDirection, delta: f32, area: Rect) {
@@ -685,6 +729,112 @@ fn get_ratio_at(node: &Node, path: &[bool]) -> Option<f32> {
         }
     } else {
         None
+    }
+}
+
+/// Path of left/right choices from `node` down to `target` (`false` = first
+/// child, `true` = second child). `None` when `target` isn't a pane in this
+/// subtree.
+fn path_to(node: &Node, target: PaneId) -> Option<Vec<bool>> {
+    match node {
+        Node::Pane(id) if *id == target => Some(Vec::new()),
+        Node::Pane(_) => None,
+        Node::Split { first, second, .. } => {
+            if let Some(mut path) = path_to(first, target) {
+                path.insert(0, false);
+                Some(path)
+            } else {
+                let mut path = path_to(second, target)?;
+                path.insert(0, true);
+                Some(path)
+            }
+        }
+    }
+}
+
+/// Path to the topmost `Direction::Horizontal` split node reachable from
+/// `root` via an unbroken chain of `Horizontal` splits down to `target` —
+/// i.e. the root of the "row of columns" `target` currently sits in. `None`
+/// when `target` isn't inside a `Horizontal` split at all (every ancestor is
+/// `Vertical`, or it's the tab's only pane).
+fn horizontal_run_root(root: &Node, target: PaneId) -> Option<Vec<bool>> {
+    let path = path_to(root, target)?;
+    let mut node = root;
+    let mut run_root: Option<Vec<bool>> = None;
+    let mut prefix: Vec<bool> = Vec::new();
+    for step in path {
+        let Node::Split {
+            direction,
+            first,
+            second,
+            ..
+        } = node
+        else {
+            break;
+        };
+        match direction {
+            Direction::Horizontal => {
+                if run_root.is_none() {
+                    run_root = Some(prefix.clone());
+                }
+            }
+            Direction::Vertical => run_root = None,
+        }
+        prefix.push(step);
+        node = if step { second.as_ref() } else { first.as_ref() };
+    }
+    run_root
+}
+
+/// Number of opaque "column" units inside the `Direction::Horizontal` run
+/// rooted at `node`. A bare pane and the root of a `Direction::Vertical`
+/// split each count as one column; `Horizontal` splits are transparent and
+/// contribute the sum of both sides.
+fn run_units(node: &Node) -> usize {
+    match node {
+        Node::Pane(_) => 1,
+        Node::Split {
+            direction: Direction::Vertical,
+            ..
+        } => 1,
+        Node::Split {
+            direction: Direction::Horizontal,
+            first,
+            second,
+            ..
+        } => run_units(first) + run_units(second),
+    }
+}
+
+/// Rewrite ratios throughout the `Direction::Horizontal` run rooted at
+/// `node` so every column ends up equal width. Stops at any
+/// `Direction::Vertical` boundary — that's a separate run, left untouched.
+fn equalize_run(node: &mut Node) {
+    let Node::Split {
+        direction: Direction::Horizontal,
+        ratio,
+        first,
+        second,
+    } = node
+    else {
+        return;
+    };
+    let left = run_units(first.as_ref()) as f32;
+    let right = run_units(second.as_ref()) as f32;
+    *ratio = valid_split_ratio(left / (left + right));
+    equalize_run(first);
+    equalize_run(second);
+}
+
+fn node_at_mut<'a>(node: &'a mut Node, path: &[bool]) -> Option<&'a mut Node> {
+    match path.split_first() {
+        None => Some(node),
+        Some((step, rest)) => match node {
+            Node::Pane(_) => None,
+            Node::Split { first, second, .. } => {
+                node_at_mut(if *step { second } else { first }, rest)
+            }
+        },
     }
 }
 
@@ -1163,5 +1313,220 @@ mod tests {
         assert_eq!(layout.focused(), pane(4));
         assert!(layout.close_focused());
         assert_eq!(layout.focused(), pane(2));
+    }
+
+    #[test]
+    fn equalize_columns_splits_three_evenly_regardless_of_shape() {
+        // A left-deep chain (1 | 2 | 3) and a right-heavy tree ((1 | 2) | 3)
+        // both represent the same three side-by-side columns and must
+        // equalize to the same thirds.
+        let left_deep = TileLayout::from_saved(
+            Node::Split {
+                direction: Direction::Horizontal,
+                ratio: 0.7,
+                first: Box::new(Node::Pane(pane(1))),
+                second: Box::new(Node::Split {
+                    direction: Direction::Horizontal,
+                    ratio: 0.2,
+                    first: Box::new(Node::Pane(pane(2))),
+                    second: Box::new(Node::Pane(pane(3))),
+                }),
+            },
+            pane(1),
+        );
+        let bushy = TileLayout::from_saved(
+            Node::Split {
+                direction: Direction::Horizontal,
+                ratio: 0.4,
+                first: Box::new(Node::Split {
+                    direction: Direction::Horizontal,
+                    ratio: 0.9,
+                    first: Box::new(Node::Pane(pane(1))),
+                    second: Box::new(Node::Pane(pane(2))),
+                }),
+                second: Box::new(Node::Pane(pane(3))),
+            },
+            pane(3),
+        );
+
+        for mut layout in [left_deep, bushy] {
+            layout.equalize_columns_containing(pane(2));
+            let widths: std::collections::HashMap<_, _> = layout
+                .panes(Rect::new(0, 0, 90, 30))
+                .into_iter()
+                .map(|info| (info.id, info.rect.width))
+                .collect();
+            assert_eq!(widths[&pane(1)], 30);
+            assert_eq!(widths[&pane(2)], 30);
+            assert_eq!(widths[&pane(3)], 30);
+        }
+    }
+
+    #[test]
+    fn equalize_columns_stays_within_horizontal_run_only() {
+        // Top row: two unevenly-split columns. Bottom: a single pane. The
+        // rows are stacked with an unrelated ratio that must survive.
+        let mut layout = TileLayout::from_saved(
+            Node::Split {
+                direction: Direction::Vertical,
+                ratio: 0.75,
+                first: Box::new(Node::Split {
+                    direction: Direction::Horizontal,
+                    ratio: 0.8,
+                    first: Box::new(Node::Pane(pane(1))),
+                    second: Box::new(Node::Pane(pane(2))),
+                }),
+                second: Box::new(Node::Pane(pane(3))),
+            },
+            pane(1),
+        );
+
+        layout.equalize_columns_containing(pane(1));
+
+        let splits = split_snapshot(&layout);
+        assert_eq!(splits[0], (Direction::Vertical, 0.75), "row split untouched");
+        assert_eq!(splits[1], (Direction::Horizontal, 0.5), "columns evened out");
+    }
+
+    #[test]
+    fn equalize_columns_treats_nested_row_as_one_opaque_column() {
+        // Two columns; the right column is itself split into two stacked
+        // rows. The row split inside that column is not a "column" and
+        // must be left alone by equalize.
+        let mut layout = TileLayout::from_saved(
+            Node::Split {
+                direction: Direction::Horizontal,
+                ratio: 0.9,
+                first: Box::new(Node::Pane(pane(1))),
+                second: Box::new(Node::Split {
+                    direction: Direction::Vertical,
+                    ratio: 0.3,
+                    first: Box::new(Node::Pane(pane(2))),
+                    second: Box::new(Node::Pane(pane(3))),
+                }),
+            },
+            pane(1),
+        );
+
+        layout.equalize_columns_containing(pane(1));
+
+        let splits = split_snapshot(&layout);
+        assert_eq!(splits[0], (Direction::Horizontal, 0.5), "two even columns");
+        assert_eq!(splits[1], (Direction::Vertical, 0.3), "inner row split untouched");
+    }
+
+    #[test]
+    fn equalize_columns_containing_noops_without_a_horizontal_ancestor() {
+        let mut layout = TileLayout::from_saved(
+            Node::Split {
+                direction: Direction::Vertical,
+                ratio: 0.7,
+                first: Box::new(Node::Pane(pane(1))),
+                second: Box::new(Node::Pane(pane(2))),
+            },
+            pane(1),
+        );
+
+        layout.equalize_columns_containing(pane(1));
+
+        assert_eq!(split_snapshot(&layout), vec![(Direction::Vertical, 0.7)]);
+    }
+
+    #[test]
+    fn equalize_columns_containing_noops_for_lone_pane() {
+        let (mut layout, root) = TileLayout::new();
+
+        layout.equalize_columns_containing(root);
+
+        assert_eq!(layout.pane_count(), 1);
+    }
+
+    #[test]
+    fn closing_middle_column_of_three_reequalizes_the_remaining_two() {
+        // (1 | (2 | 3)), 2 gets closed, 1 and 3 should end up 50/50 rather
+        // than inheriting the stale three-way ratio.
+        let mut layout = TileLayout::from_saved(
+            Node::Split {
+                direction: Direction::Horizontal,
+                ratio: 0.2,
+                first: Box::new(Node::Pane(pane(1))),
+                second: Box::new(Node::Split {
+                    direction: Direction::Horizontal,
+                    ratio: 0.9,
+                    first: Box::new(Node::Pane(pane(2))),
+                    second: Box::new(Node::Pane(pane(3))),
+                }),
+            },
+            pane(1),
+        );
+
+        let run_path = layout.horizontal_run_path_containing(pane(2));
+        assert!(layout.close_pane(pane(2)));
+        if let Some(path) = run_path {
+            layout.equalize_columns_after_removal(&path);
+        }
+
+        assert_eq!(split_snapshot(&layout), vec![(Direction::Horizontal, 0.5)]);
+        assert_eq!(layout.pane_ids(), vec![pane(1), pane(3)]);
+    }
+
+    #[test]
+    fn closing_a_column_that_collapses_the_run_touches_nothing_else() {
+        // Regression test: an earlier implementation picked *any* surviving
+        // pane under the run root to re-derive membership from, which could
+        // land inside an unrelated nested split and corrupt its ratio. Here
+        // pane 1's only sibling is a Vertical block whose *own* first child
+        // is itself a Horizontal split (2 | 3) with a deliberately unusual
+        // ratio. Closing pane 1 collapses the outer run to a single
+        // remaining unit (nothing left to equalize there), and the unrelated
+        // inner (2 | 3) split must be left completely alone.
+        let mut layout = TileLayout::from_saved(
+            Node::Split {
+                direction: Direction::Horizontal,
+                ratio: 0.6,
+                first: Box::new(Node::Pane(pane(1))),
+                second: Box::new(Node::Split {
+                    direction: Direction::Vertical,
+                    ratio: 0.5,
+                    first: Box::new(Node::Split {
+                        direction: Direction::Horizontal,
+                        ratio: 0.25,
+                        first: Box::new(Node::Pane(pane(2))),
+                        second: Box::new(Node::Pane(pane(3))),
+                    }),
+                    second: Box::new(Node::Pane(pane(4))),
+                }),
+            },
+            pane(1),
+        );
+
+        let run_path = layout.horizontal_run_path_containing(pane(1));
+        assert!(layout.close_pane(pane(1)));
+        if let Some(path) = run_path {
+            layout.equalize_columns_after_removal(&path);
+        }
+
+        assert_eq!(
+            split_snapshot(&layout),
+            vec![(Direction::Vertical, 0.5), (Direction::Horizontal, 0.25)],
+            "the unrelated inner column split must be untouched"
+        );
+    }
+
+    #[test]
+    fn horizontal_run_path_containing_matches_the_scoping_rules() {
+        let layout = sample_layout();
+        // sample_layout: Split(H, [1, Split(V, [2, Split(H, [3, 4])])])
+        assert_eq!(layout.horizontal_run_path_containing(pane(1)), Some(vec![]));
+        assert_eq!(
+            layout.horizontal_run_path_containing(pane(3)),
+            Some(vec![true, true])
+        );
+        assert_eq!(
+            layout.horizontal_run_path_containing(pane(4)),
+            Some(vec![true, true])
+        );
+        // pane 2 sits directly under a Vertical split, no Horizontal run.
+        assert_eq!(layout.horizontal_run_path_containing(pane(2)), None);
     }
 }
