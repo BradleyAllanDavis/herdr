@@ -335,6 +335,13 @@ impl Tab {
                 "split target pane is not in the layout",
             ));
         };
+        // Default (no explicit ratio) column splits keep the row of side-by-side
+        // panes evenly divided, so a 3rd/4th/... column reflows the existing ones
+        // instead of leaving them at a stale binary-split width. A caller-supplied
+        // ratio is left alone.
+        if ratio.is_none() && matches!(direction, Direction::Horizontal) {
+            self.layout.equalize_columns_containing(new_id);
+        }
         let actual_cwd =
             cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| "/".into()));
         let launch_argv = if let Some(SplitCommand::Argv { argv, .. }) = &command {
@@ -504,8 +511,15 @@ impl Tab {
         }
 
         let next_root = self.promoted_root_if_needed(pane_id);
+        // Capture the column run's position before removal so the remaining
+        // columns can be re-equalized once `pane_id` is gone.
+        let run_path = self.layout.horizontal_run_path_containing(pane_id);
 
         self.layout.close_pane(pane_id);
+
+        if let Some(path) = run_path {
+            self.layout.equalize_columns_after_removal(&path);
+        }
 
         let pane = self.panes.remove(&pane_id)?;
         let terminal_id = pane.attached_terminal_id;
