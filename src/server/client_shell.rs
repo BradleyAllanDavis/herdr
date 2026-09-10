@@ -189,7 +189,7 @@ pub(super) fn snapshot(
             crate::app::state::TabBarStatusSegment::Text(Some(text)) if !text.is_empty() => {
                 Some(protocol::ClientShellTabStatusSegment {
                     text: text.clone(),
-                    accent: false,
+                    accent: true,
                 })
             }
             crate::app::state::TabBarStatusSegment::Zoom
