@@ -226,9 +226,26 @@ pub(crate) fn render_tab_bar(
     render_tab_bar_status(buffer, area, snapshot, palette);
 }
 
+// Powerline "half circle thick" glyphs -- same rounded-pill end caps used by
+// this fork's starship prompt config (`[hostname]`'s `[](fg:X bg:none)`
+// wrapper). Only meaningful with a Nerd Font, which this fork already
+// assumes elsewhere.
+const PILL_LEFT_CAP: &str = "\u{e0b6}";
+const PILL_RIGHT_CAP: &str = "\u{e0b4}";
+const PILL_CAP_WIDTH: u16 = 2; // one column per cap glyph
+
+fn tab_bar_status_segment_width(segment: &crate::protocol::ClientShellTabStatusSegment) -> u16 {
+    let text_width = display_width(&segment.text);
+    if segment.accent {
+        text_width.saturating_add(PILL_CAP_WIDTH)
+    } else {
+        text_width
+    }
+}
+
 pub(crate) fn tab_bar_status_width(snapshot: &ClientShellSnapshot) -> u16 {
     let content = snapshot.tab_bar_right.iter().fold(0u16, |width, segment| {
-        width.saturating_add(display_width(&segment.text))
+        width.saturating_add(tab_bar_status_segment_width(segment))
     });
     let separators = snapshot.tab_bar_right.len().saturating_sub(1);
     content.saturating_add(
@@ -280,17 +297,25 @@ fn render_tab_bar_status(
             );
             x = x.saturating_add(separator_width);
         }
-        let width = display_width(&segment.text);
-        let style = if segment.accent {
-            Style::default()
+        if segment.accent {
+            let cap_style = Style::default().fg(palette.accent).bg(palette.panel_bg);
+            put_text(buffer, x, area.y, 1, PILL_LEFT_CAP, cap_style);
+            x = x.saturating_add(1);
+            let width = display_width(&segment.text);
+            let fill_style = Style::default()
                 .fg(panel_contrast_fg(palette))
                 .bg(palette.accent)
-                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::BOLD);
+            put_text(buffer, x, area.y, width, &segment.text, fill_style);
+            x = x.saturating_add(width);
+            put_text(buffer, x, area.y, 1, PILL_RIGHT_CAP, cap_style);
+            x = x.saturating_add(1);
         } else {
-            Style::default().fg(palette.overlay1).bg(palette.panel_bg)
-        };
-        put_text(buffer, x, area.y, width, &segment.text, style);
-        x = x.saturating_add(width);
+            let width = display_width(&segment.text);
+            let style = Style::default().fg(palette.overlay1).bg(palette.panel_bg);
+            put_text(buffer, x, area.y, width, &segment.text, style);
+            x = x.saturating_add(width);
+        }
     }
 }
 
