@@ -116,7 +116,10 @@ fn tab_bar_renders_endpoint_status_ellipses_and_clamps_to_useful_scroll() {
         .iter()
         .map(|cell| cell.symbol.as_str())
         .collect::<String>();
-    assert!(top.contains("ZOOM · host"));
+    // ZOOM is an accent segment, so it renders wrapped in the pill end-cap
+    // glyphs (U+E0B6/U+E0B4); "host" is a plain (non-accent) Text segment
+    // and stays flush against the separator.
+    assert!(top.contains("\u{e0b6}ZOOM\u{e0b4} · host"));
     assert!(top.contains('…'));
 
     state.tab_scroll = usize::MAX;
