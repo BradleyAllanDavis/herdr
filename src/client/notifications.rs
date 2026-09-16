@@ -117,10 +117,9 @@ pub(super) fn sound_from_notify_message(message: &str) -> Option<crate::sound::S
 }
 
 /// Server-provided volume wins when present (remote mode, server-
-/// authoritative); otherwise falls back to this client's own local config
-/// (local mode, or a peer that predates the volume field entirely) —
-/// matching pre-volume-field behavior exactly when there's nothing to fall
-/// back from.
+/// authoritative); otherwise falls back to this client's own local config —
+/// e.g. a notification with no sound at all has nothing meaningful to
+/// provide here.
 fn resolve_notify_volume(server_volume: Option<f32>, sound_config: &crate::config::SoundConfig) -> f32 {
     server_volume.unwrap_or_else(|| sound_config.effective_volume())
 }

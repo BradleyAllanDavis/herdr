@@ -17,7 +17,20 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// Current protocol version. Bumped when wire format changes incompatibly.
-pub const PROTOCOL_VERSION: u32 = 22;
+///
+/// 23: added `volume: Option<u8>` to `SemanticNotification` and
+/// `ServerMessage::Notify`. `#[serde(default)]` does NOT make this backward
+/// compatible at the byte level the way it would for a self-describing
+/// format like JSON — bincode's serde integration encodes/decodes structs as
+/// plain field sequences (`visit_seq`), and a payload that's genuinely
+/// shorter (an older peer's struct with fewer fields) hits a hard
+/// `UnexpectedEnd` read error partway through the next field, not a clean
+/// "no more elements" signal that `#[serde(default)]` could substitute for —
+/// confirmed empirically, see `semantic_notification_missing_volume_field_defaults_to_none`
+/// below. Real cross-version tolerance for this wire is the version check
+/// itself (`check_client_version`): any mismatch is rejected outright at
+/// handshake with a clear error, not a silent partial decode.
+pub const PROTOCOL_VERSION: u32 = 23;
 
 /// Maximum allowed frame payload size (2 MB). Frames larger than this are
 /// rejected to prevent denial-of-service via oversized length prefixes.
@@ -1321,10 +1334,12 @@ pub struct SemanticNotification {
     pub position: Option<crate::config::ToastHerdrPosition>,
     /// Server-authoritative playback volume for `sound`, as an integer
     /// percent (0-100; not a float, so this struct can keep deriving `Eq`).
-    /// `#[serde(default)]` so a peer that predates this field (older client
-    /// or older server) still deserializes fine — absent means "no
-    /// server-provided volume", and the receiving client falls back to its
-    /// own local `[ui.sound] volume`.
+    /// `None` when this notification has no sound to begin with (a
+    /// toast-only event) — the client falls back to its own local
+    /// `[ui.sound] volume` in that case. `#[serde(default)]` is present for
+    /// any non-bincode (JSON) construction of this type; it does NOT provide
+    /// cross-version wire tolerance for a peer on a different
+    /// `PROTOCOL_VERSION` — see that constant's doc comment.
     #[serde(default)]
     pub volume: Option<u8>,
 }
@@ -1371,9 +1386,12 @@ pub enum ServerMessage {
         body: Option<String>,
         /// Server-authoritative playback volume when `kind` is `Sound`, as an
         /// integer percent (0-100; not a float, so `ServerMessage` can keep
-        /// deriving `Eq`). `#[serde(default)]` for back-compat with a peer
-        /// that predates this field — absent means "fall back to the
-        /// client's own local `[ui.sound] volume`".
+        /// deriving `Eq`). `None` for non-Sound kinds, or if the client
+        /// should fall back to its own local `[ui.sound] volume`.
+        /// `#[serde(default)]` is present for any non-bincode (JSON)
+        /// construction of this type; it does NOT provide cross-version wire
+        /// tolerance for a peer on a different `PROTOCOL_VERSION` — see that
+        /// constant's doc comment.
         #[serde(default)]
         volume: Option<u8>,
     },
@@ -2774,14 +2792,23 @@ mod tests {
 
     /// A pre-volume-field peer's exact `SemanticNotification` wire shape —
     /// every field up to but not including the trailing `volume` field this
-    /// change added — used to simulate an older server/client talking to
-    /// code that now expects that field. bincode's serde integration decodes
-    /// structs via `visit_seq`: when the byte sequence ends before a
-    /// trailing `#[serde(default)]` field, serde substitutes the default
-    /// instead of erroring, which is exactly why `volume` was appended at
-    /// the end of the real struct (and of `ServerMessage::Notify`) rather
-    /// than inserted elsewhere — see this codebase's existing
-    /// `ServerCapabilities` struct for the same established idiom.
+    /// change added — used to prove what actually happens when a shorter
+    /// payload is decoded against the current (one-field-longer) struct.
+    ///
+    /// This is NOT graceful: bincode's serde integration decodes structs via
+    /// `visit_seq`, but unlike a self-describing format (JSON), it has no
+    /// "end of object" marker — each field is read by consuming exactly as
+    /// many bytes as its type needs, with no signal that distinguishes
+    /// "legitimately fewer fields" from "truncated garbage". A payload that
+    /// genuinely lacks the trailing field hits a hard `UnexpectedEnd` error
+    /// partway through decoding it, not a clean "no more elements" that
+    /// `#[serde(default)]` could substitute for. Confirmed empirically here
+    /// (this test asserts the error, it does NOT decode successfully) —
+    /// `PROTOCOL_VERSION`'s own doc comment has the full story and the real
+    /// mechanism this wire actually relies on for cross-version safety: a
+    /// strict version-equality handshake check that rejects any mismatch
+    /// outright, rather than silently decoding a shorter/differently-shaped
+    /// payload.
     #[derive(serde::Serialize)]
     struct PreVolumeSemanticNotification {
         kind: SemanticNotificationKind,
@@ -2796,7 +2823,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_notification_missing_volume_field_defaults_to_none() {
+    fn semantic_notification_missing_volume_field_is_a_hard_decode_error_not_a_default() {
         let old = PreVolumeSemanticNotification {
             kind: SemanticNotificationKind::Finished,
             title: "agent done".to_owned(),
@@ -2809,22 +2836,14 @@ mod tests {
             position: None,
         };
         let encoded = bincode::serde::encode_to_vec(&old, bincode::config::standard()).unwrap();
-        let (decoded, _): (SemanticNotification, _) =
-            bincode::serde::decode_from_slice(&encoded, bincode::config::standard()).unwrap();
-        assert_eq!(
-            decoded,
-            SemanticNotification {
-                kind: SemanticNotificationKind::Finished,
-                title: "agent done".to_owned(),
-                body: None,
-                sound: Some(SemanticNotificationSound::Done),
-                agent: Some("claude".to_owned()),
-                workspace_id: None,
-                tab_id: None,
-                pane_id: None,
-                position: None,
-                volume: None,
-            }
+        let result: Result<(SemanticNotification, usize), _> =
+            bincode::serde::decode_from_slice(&encoded, bincode::config::standard());
+        assert!(
+            result.is_err(),
+            "bincode should NOT gracefully default a genuinely-truncated trailing field \
+             (#[serde(default)] doesn't provide wire back-compat for this format — see \
+             PROTOCOL_VERSION's doc comment); if this ever starts passing, bincode's \
+             behavior changed and the doc comments referencing this test need updating"
         );
     }
 
