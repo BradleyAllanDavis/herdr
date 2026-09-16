@@ -1565,6 +1565,7 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
             tab_id: Some("tab_2".into()),
             pane_id: Some("pane_2".into()),
             position: None,
+            volume: None,
         },
         now,
     );
@@ -1627,6 +1628,7 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
             tab_id: Some("tab_2".into()),
             pane_id: Some("pane_2".into()),
             position: None,
+            volume: None,
         },
         now,
     );
@@ -1658,6 +1660,7 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
             tab_id: Some("tab_2".into()),
             pane_id: Some("pane_2".into()),
             position: None,
+            volume: None,
         },
         now,
     );
@@ -1675,6 +1678,7 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
             tab_id: Some("tab_2".into()),
             pane_id: Some("pane_2".into()),
             position: None,
+            volume: None,
         },
         now,
     );

@@ -30,6 +30,7 @@ pub enum TabBarRightEntryConfig {
     Text {
         text: String,
     },
+    SoundVolume,
     Command {
         command: String,
         #[serde(default = "default_command_interval_seconds")]
@@ -105,7 +106,8 @@ pub(crate) fn tab_bar_right_diagnostics(entries: &[TabBarRightEntryConfig]) -> V
             }
             TabBarRightEntryConfig::Zoom
             | TabBarRightEntryConfig::Hostname
-            | TabBarRightEntryConfig::Text { .. } => {}
+            | TabBarRightEntryConfig::Text { .. }
+            | TabBarRightEntryConfig::SoundVolume => {}
         }
     }
 
@@ -130,15 +132,17 @@ entries = [
   { type = "hostname" },
   { type = "datetime", format = "%H:%M" },
   { type = "text", text = "prod" },
+  { type = "sound_volume" },
   { type = "command", command = "status.sh" },
 ]
 "#,
         )
         .expect("parse tab bar entries");
 
-        assert_eq!(parsed.entries.len(), 5);
+        assert_eq!(parsed.entries.len(), 6);
+        assert_eq!(parsed.entries[4], TabBarRightEntryConfig::SoundVolume);
         assert!(matches!(
-            &parsed.entries[4],
+            &parsed.entries[5],
             TabBarRightEntryConfig::Command {
                 interval_seconds: DEFAULT_TAB_BAR_COMMAND_INTERVAL_SECONDS,
                 timeout_seconds: DEFAULT_TAB_BAR_COMMAND_TIMEOUT_SECONDS,

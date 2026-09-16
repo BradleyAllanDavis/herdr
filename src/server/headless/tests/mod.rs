@@ -7215,6 +7215,7 @@ fn semantic_notifications_broadcast_only_to_client_shells() {
         tab_id: None,
         pane_id: None,
         position: None,
+        volume: None,
     };
     assert!(server.send_to_client_shells(ServerMessage::SemanticNotification(event.clone())));
     for receiver in [shell_one_control, shell_two_control] {
@@ -7278,6 +7279,7 @@ fn notification_show_uses_client_shell_policy_independent_of_server_delivery() {
             tab_id: None,
             pane_id: None,
             position: Some(crate::config::ToastHerdrPosition::TopLeft),
+            volume: Some(100),
         })
     );
 }
@@ -7315,6 +7317,7 @@ fn client_local_notifications_target_foreground_client_only() {
         kind: protocol::NotifyKind::Toast,
         message: "pi finished".to_string(),
         body: Some("workspace 1".to_string()),
+        volume: None,
     }));
 
     match read_server_message(
@@ -7326,6 +7329,7 @@ fn client_local_notifications_target_foreground_client_only() {
             kind,
             message,
             body,
+            ..
         } => {
             assert_eq!(kind, protocol::NotifyKind::Toast);
             assert_eq!(message, "pi finished");

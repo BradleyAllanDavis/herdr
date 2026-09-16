@@ -1114,6 +1114,16 @@ impl ClientShellState {
                 direction: direction(action)?,
                 amount: None,
             })),
+            KeybindAction::SoundVolumeUp => Some(Method::SoundVolumeStep(
+                crate::api::schema::SoundVolumeStepParams {
+                    direction: crate::api::schema::SoundVolumeStepDirection::Up,
+                },
+            )),
+            KeybindAction::SoundVolumeDown => Some(Method::SoundVolumeStep(
+                crate::api::schema::SoundVolumeStepParams {
+                    direction: crate::api::schema::SoundVolumeStepDirection::Down,
+                },
+            )),
             _ => None,
         }
     }

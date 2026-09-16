@@ -204,6 +204,10 @@ impl ClientShellState {
                             SemanticNotificationSound::Request => crate::sound::Sound::Request,
                         },
                         agent: pending.event.agent.clone(),
+                        volume: pending
+                            .event
+                            .volume
+                            .map(|percent| f32::from(percent) / 100.0),
                     });
                 }
             }

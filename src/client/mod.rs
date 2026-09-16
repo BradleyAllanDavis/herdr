@@ -1793,9 +1793,16 @@ async fn run_client_loop(
                         kind,
                         message,
                         body,
+                        volume,
                     } => {
                         if state.shell.is_none() {
-                            handle_notify(kind, &message, body.as_deref(), &state.sound_config);
+                            handle_notify(
+                                kind,
+                                &message,
+                                body.as_deref(),
+                                &state.sound_config,
+                                volume.map(|percent| f32::from(percent) / 100.0),
+                            );
                         }
                     }
                     ServerMessage::SemanticNotification(event) => {
