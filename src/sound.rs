@@ -38,18 +38,11 @@ pub enum Sound {
     Request,
 }
 
-/// Play a notification sound in a background thread, at the volume from
-/// `config` (i.e. `config.effective_volume()`).
-/// Silently does nothing if no audio player is available.
-pub fn play(sound: Sound, config: &crate::config::SoundConfig) {
-    play_at_volume(sound, config, config.effective_volume());
-}
-
 /// Play a notification sound in a background thread, at an explicit volume
-/// (0.0..=1.0, clamped defensively) that overrides `config.volume` — used
-/// when a peer (typically the server, in `--remote` mode) provided its own
-/// volume alongside the notification. Falls back to `config`'s own volume
-/// when the caller has nothing better (see call sites in `client::notifications`).
+/// (0.0..=1.0, clamped defensively) — the caller resolves which volume to
+/// use (server-provided when present, else `config.effective_volume()`; see
+/// `client::notifications::resolve_notify_volume`).
+/// Silently does nothing if no audio player is available.
 pub fn play_at_volume(sound: Sound, config: &crate::config::SoundConfig, volume: f32) {
     if sound_playback_disabled_by_env() {
         return;
