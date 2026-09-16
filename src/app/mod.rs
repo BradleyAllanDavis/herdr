@@ -1904,16 +1904,7 @@ mod tests {
         // stopped — that edit must win, not the stale persisted live value
         // (the bug this test guards against: a restart used to always
         // prefer the persisted file over a config edit made while down).
-        let config = Config {
-            ui: crate::config::UiConfig {
-                sound: crate::config::SoundConfig {
-                    volume: 0.6,
-                    ..crate::config::SoundConfig::default()
-                },
-                ..Default::default()
-            },
-            ..Default::default()
-        };
+        let config: Config = toml::from_str("[ui.sound]\nvolume = 0.6\n").unwrap();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let policy = AppPolicy {
             persist_sound_volume: true,
