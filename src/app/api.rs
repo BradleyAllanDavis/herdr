@@ -971,16 +971,26 @@ impl App {
             }
             Method::SoundVolumeStep(params) => {
                 const SOUND_VOLUME_STEP: f32 = 0.1;
-                const SOUND_VOLUME_STEP_FLOOR: f32 = 0.05;
-                let delta = match params.direction {
-                    crate::api::schema::SoundVolumeStepDirection::Up => SOUND_VOLUME_STEP,
-                    crate::api::schema::SoundVolumeStepDirection::Down => -SOUND_VOLUME_STEP,
-                };
                 // Tighter floor than SoundVolumeSet's 0.0..=1.0: a live
                 // up/down step never reaches fully silent, only an explicit
                 // `sound.volume.set 0`/config edit can.
-                let target = (self.state.sound.volume + delta)
-                    .clamp(SOUND_VOLUME_STEP_FLOOR, 1.0);
+                const SOUND_VOLUME_STEP_FLOOR: f32 = 0.05;
+                let current = self.state.sound.volume;
+                let target = match params.direction {
+                    crate::api::schema::SoundVolumeStepDirection::Up => {
+                        (current + SOUND_VOLUME_STEP).min(1.0)
+                    }
+                    crate::api::schema::SoundVolumeStepDirection::Down => {
+                        // .min(current) matters when the config set a volume
+                        // below the step floor (e.g. 0.02, only reachable via
+                        // config — the floor only applies to a live step, not
+                        // to SoundVolumeSet/config): without it, "down" would
+                        // clamp up to the floor and *raise* the volume.
+                        (current - SOUND_VOLUME_STEP)
+                            .max(SOUND_VOLUME_STEP_FLOOR)
+                            .min(current)
+                    }
+                };
                 self.set_sound_volume(target);
                 SuccessResponse {
                     id: request.id,
@@ -2581,5 +2591,25 @@ mod tests {
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
         assert_eq!(response["result"]["volume"], 1.0);
         assert_eq!(app.state.sound.volume, 1.0);
+    }
+
+    #[test]
+    fn sound_volume_step_down_never_raises_a_below_floor_config_value() {
+        // Only reachable via config (SoundVolumeSet/config both allow the
+        // full 0.0..=1.0 range) — a live "down" step must never *increase*
+        // volume by clamping up to its own 0.05 floor.
+        let mut app = sound_volume_test_app();
+        app.state.sound.volume = 0.02;
+
+        let response = app.handle_api_request(sound_volume_request(
+            crate::api::schema::Method::SoundVolumeStep(
+                crate::api::schema::SoundVolumeStepParams {
+                    direction: crate::api::schema::SoundVolumeStepDirection::Down,
+                },
+            ),
+        ));
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["result"]["volume"], 0.02);
+        assert_eq!(app.state.sound.volume, 0.02);
     }
 }

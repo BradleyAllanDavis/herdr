@@ -271,11 +271,11 @@ impl HeadlessServer {
             sound_notify_message(crate::sound::Sound::Done),
             None,
         );
-        let volume = self.app.state.sound.effective_volume();
+        let percent = sound_volume_percent(self.app.state.sound.effective_volume());
         self.send_to_client_shells(ServerMessage::SemanticNotification(
             protocol::SemanticNotification {
                 kind: protocol::SemanticNotificationKind::Custom,
-                title: format!("♪ volume {}%", (volume * 100.0).round() as i64),
+                title: format!("♪ volume {percent}%"),
                 body: None,
                 sound: Some(protocol::SemanticNotificationSound::Done),
                 agent: None,
@@ -283,7 +283,7 @@ impl HeadlessServer {
                 tab_id: None,
                 pane_id: None,
                 position: None,
-                volume: Some(sound_volume_percent(volume)),
+                volume: Some(percent),
             },
         ));
     }

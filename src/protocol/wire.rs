@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 /// shorter (an older peer's struct with fewer fields) hits a hard
 /// `UnexpectedEnd` read error partway through the next field, not a clean
 /// "no more elements" signal that `#[serde(default)]` could substitute for —
-/// confirmed empirically, see `semantic_notification_missing_volume_field_defaults_to_none`
+/// confirmed empirically, see `semantic_notification_missing_volume_field_is_a_hard_decode_error_not_a_default`
 /// below. Real cross-version tolerance for this wire is the version check
 /// itself (`check_client_version`): any mismatch is rejected outright at
 /// handshake with a clear error, not a silent partial decode.

@@ -203,14 +203,16 @@ fn load_plugin_registry(
 }
 
 /// Initial live sound volume: the last-persisted in-session adjustment if
-/// one was ever saved, else the config's own volume. See the sticky-volume
-/// handling in `apply_live_config`, which keeps a live adjustment from being
-/// clobbered back to the config value on a mere `reload-config`.
+/// one was ever saved AND the config's volume hasn't changed since (the
+/// exact same sticky rule `apply_live_config` applies on every
+/// `reload-config`, applied once here at startup — see
+/// `sound_volume_state::load`'s doc comment for why the config comparison
+/// matters even at boot, not just on reload).
 fn load_sound_volume(persist_sound_volume: bool, config_volume: f32) -> f32 {
     if !persist_sound_volume {
         return config_volume;
     }
-    crate::sound_volume_state::load().unwrap_or(config_volume)
+    crate::sound_volume_state::load(config_volume).unwrap_or(config_volume)
 }
 
 fn agent_panel_sort_from_config(
@@ -791,7 +793,9 @@ impl App {
         }
         self.state.sound.volume = volume;
         if self.policy.persist_sound_volume {
-            if let Err(err) = crate::sound_volume_state::save(volume) {
+            if let Err(err) =
+                crate::sound_volume_state::save(volume, self.sound_volume_config_baseline)
+            {
                 tracing::warn!(err = %err, "failed to persist sound volume");
             }
         }
@@ -916,7 +920,10 @@ impl App {
                 if !config_volume_changed {
                     self.state.sound.volume = live_volume;
                 } else if self.policy.persist_sound_volume {
-                    if let Err(err) = crate::sound_volume_state::save(self.state.sound.volume) {
+                    if let Err(err) = crate::sound_volume_state::save(
+                        self.state.sound.volume,
+                        self.sound_volume_config_baseline,
+                    ) {
                         tracing::warn!(err = %err, "failed to persist sound volume");
                     }
                 }
@@ -1848,6 +1855,76 @@ mod tests {
         assert_eq!(app.state.sound.volume, 0.6);
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn startup_restores_persisted_sound_volume_only_when_config_is_unchanged() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("startup-sound-volume-unchanged");
+        let state_home = path.parent().unwrap().join("state");
+        let original_xdg_state_home = std::env::var_os("XDG_STATE_HOME");
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        std::env::set_var("XDG_STATE_HOME", &state_home);
+
+        // A prior session live-adjusted volume to 0.35 while config.toml
+        // said (the default) 1.0, and that got persisted.
+        crate::sound_volume_state::save(0.35, 1.0).unwrap();
+
+        // config.toml still has no [ui.sound] section — volume is still the
+        // 1.0 default, unchanged since the persisted value was saved.
+        let config = Config::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let policy = AppPolicy {
+            persist_sound_volume: true,
+            ..AppPolicy::TEST
+        };
+        let app = App::new(&config, policy, None, api_rx, crate::api::EventHub::default());
+
+        assert_eq!(app.state.sound.volume, 0.35);
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        restore_xdg_state_home(original_xdg_state_home);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn startup_ignores_persisted_sound_volume_when_operator_edited_config_while_stopped() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("startup-sound-volume-edited");
+        let state_home = path.parent().unwrap().join("state");
+        let original_xdg_state_home = std::env::var_os("XDG_STATE_HOME");
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        std::env::set_var("XDG_STATE_HOME", &state_home);
+
+        // Same prior live adjustment as above: 0.35 while config said 1.0.
+        crate::sound_volume_state::save(0.35, 1.0).unwrap();
+
+        // But the operator edited config.toml to 0.6 while the server was
+        // stopped — that edit must win, not the stale persisted live value
+        // (the bug this test guards against: a restart used to always
+        // prefer the persisted file over a config edit made while down).
+        let config = Config {
+            ui: crate::config::UiConfig {
+                sound: crate::config::SoundConfig {
+                    volume: 0.6,
+                    ..crate::config::SoundConfig::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let policy = AppPolicy {
+            persist_sound_volume: true,
+            ..AppPolicy::TEST
+        };
+        let app = App::new(&config, policy, None, api_rx, crate::api::EventHub::default());
+
+        assert_eq!(app.state.sound.volume, 0.6);
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        restore_xdg_state_home(original_xdg_state_home);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
