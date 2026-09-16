@@ -722,6 +722,7 @@ fn toast_notify_from_server_is_emitted_even_when_attach_config_was_off() {
         "pi finished",
         Some("workspace 1"),
         &sound_config,
+        None,
         |title, body| {
             emitted = Some((title.to_string(), body.map(str::to_string)));
             Ok(true)
@@ -745,6 +746,7 @@ fn system_toast_notify_from_server_uses_system_notifier() {
         "pi finished",
         Some("workspace 1"),
         &sound_config,
+        None,
         |_, _| Ok(false),
         |title, body| {
             emitted = Some((title.to_string(), body.map(str::to_string)));
@@ -768,6 +770,7 @@ fn system_toast_notify_preserves_colon_in_title() {
         "build: failed",
         Some("api workspace"),
         &sound_config,
+        None,
         |_, _| Ok(false),
         |title, body| {
             emitted = Some((title.to_string(), body.map(str::to_string)));

@@ -830,6 +830,18 @@
           "description": "Toggle sidebar collapse."
         },
         {
+          "key": "keys.sound_volume_up",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Raise the live server notification-sound volume by one step. Unset by default."
+        },
+        {
+          "key": "keys.sound_volume_down",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Lower the live server notification-sound volume by one step. Unset by default."
+        },
+        {
           "key": "keys.indexed.tabs",
           "type": "string",
           "default": "unset",
@@ -1007,12 +1019,13 @@
           "key": "ui.tab_bar_right",
           "type": "array",
           "default": "[]",
-          "description": "Configure ordered right-aligned tab bar entries. Supported types are zoom, hostname, datetime, text, and command.",
+          "description": "Configure ordered right-aligned tab bar entries. Supported types are zoom, hostname, datetime, text, sound_volume, and command. sound_volume renders e.g. \"♪ ▰▰▰▰▱▱▱▱▱▱ 35%\" (10 cells, filled = round(volume * 10)), or \"♪ muted\" when ui.sound.enabled is false.",
           "values": [
             "zoom",
             "hostname",
             "datetime",
             "text",
+            "sound_volume",
             "command"
           ]
         },
@@ -1151,6 +1164,12 @@
           "type": "boolean",
           "default": "true",
           "description": "Play sounds when agents change state in background workspaces."
+        },
+        {
+          "key": "ui.sound.volume",
+          "type": "number",
+          "default": "1.0",
+          "description": "Playback volume for all notification sounds, 0.0 (silent) to 1.0 (full volume). Server-authoritative: carried to every connected client (including over --remote) with each sound, live-adjustable via the sound_volume_up/sound_volume_down keybind actions or `herdr sound volume set`, and survives both `herdr server reload-config` and a full server restart."
         },
         {
           "key": "ui.sound.path",

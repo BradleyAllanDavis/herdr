@@ -50,6 +50,7 @@ impl App {
         self.tab_bar_status_generation = self.tab_bar_status_generation.wrapping_add(1);
         self.tab_bar_datetimes.clear();
         self.tab_bar_commands.clear();
+        self.tab_bar_sound_volumes.clear();
         self.state.tab_bar_right.clear();
         self.state.tab_bar_right_separator = sanitize_separator(separator);
 
@@ -88,6 +89,14 @@ impl App {
                         .tab_bar_right
                         .push(TabBarStatusSegment::Text(sanitize_literal_text(text)));
                 }
+                TabBarRightEntryConfig::SoundVolume => {
+                    let rendered = render_sound_volume_status(&self.state.sound);
+                    let segment_index = self.state.tab_bar_right.len();
+                    self.state
+                        .tab_bar_right
+                        .push(TabBarStatusSegment::Text(Some(rendered)));
+                    self.tab_bar_sound_volumes.push(segment_index);
+                }
                 TabBarRightEntryConfig::Command {
                     command,
                     interval_seconds,
@@ -120,6 +129,29 @@ impl App {
 
         self.next_tab_bar_datetime_refresh =
             (!self.tab_bar_datetimes.is_empty()).then_some(now + DATETIME_REFRESH_INTERVAL);
+    }
+
+    /// Re-renders every `sound_volume` tab_bar_right segment from the current
+    /// live `state.sound` — called on demand (not on a timer) whenever the
+    /// volume changes via `set_sound_volume`, so item 5's "refresh the tab
+    /// bar immediately" requirement doesn't wait for any other event.
+    /// Returns whether any segment's text actually changed.
+    pub(crate) fn refresh_sound_volume_tab_bar_segments(&mut self) -> bool {
+        if self.tab_bar_sound_volumes.is_empty() {
+            return false;
+        }
+        let rendered = render_sound_volume_status(&self.state.sound);
+        let mut changed = false;
+        for &segment_index in &self.tab_bar_sound_volumes {
+            if let Some(TabBarStatusSegment::Text(current)) =
+                self.state.tab_bar_right.get_mut(segment_index)
+            {
+                let value = Some(rendered.clone());
+                changed |= *current != value;
+                *current = value;
+            }
+        }
+        changed
     }
 
     pub(crate) fn handle_tab_bar_status_tasks(&mut self, now: std::time::Instant) -> bool {
@@ -246,6 +278,25 @@ fn sanitize_status_text(value: &str) -> Option<String> {
         .take(MAX_STATUS_TEXT_CHARS)
         .collect();
     (!value.is_empty()).then_some(value)
+}
+
+/// Renders the `sound_volume` tab_bar_right segment text, e.g.
+/// `"♪ ▰▰▰▰▱▱▱▱▱▱ 35%"` (10 cells, filled count = `round(volume * 10)`), or
+/// `"♪ muted"` when `[ui.sound] enabled = false`.
+const SOUND_VOLUME_BAR_CELLS: usize = 10;
+
+fn render_sound_volume_status(sound: &crate::config::SoundConfig) -> String {
+    if !sound.enabled {
+        return "♪ muted".to_string();
+    }
+    let volume = sound.effective_volume();
+    let filled = ((volume * SOUND_VOLUME_BAR_CELLS as f32).round() as usize)
+        .min(SOUND_VOLUME_BAR_CELLS);
+    let bar: String = (0..SOUND_VOLUME_BAR_CELLS)
+        .map(|cell| if cell < filled { '▰' } else { '▱' })
+        .collect();
+    let percent = (volume * 100.0).round() as i64;
+    format!("♪ {bar} {percent}%")
 }
 
 fn is_unicode_format_control(character: char) -> bool {
@@ -822,5 +873,75 @@ mod tests {
     #[test]
     fn separator_preserves_printable_spacing_and_drops_controls() {
         assert_eq!(sanitize_separator(" \x1b|\n "), " | ");
+    }
+
+    fn sound_config_with_volume(volume: f32) -> crate::config::SoundConfig {
+        crate::config::SoundConfig {
+            volume,
+            ..crate::config::SoundConfig::default()
+        }
+    }
+
+    #[test]
+    fn sound_volume_status_renders_bar_and_percent() {
+        // round(0.35 * 10) = 4 filled cells (f32::round rounds half away from zero).
+        assert_eq!(
+            render_sound_volume_status(&sound_config_with_volume(0.35)),
+            "♪ ▰▰▰▰▱▱▱▱▱▱ 35%"
+        );
+    }
+
+    #[test]
+    fn sound_volume_status_full_and_empty_bars() {
+        assert_eq!(
+            render_sound_volume_status(&sound_config_with_volume(1.0)),
+            "♪ ▰▰▰▰▰▰▰▰▰▰ 100%"
+        );
+        assert_eq!(
+            render_sound_volume_status(&sound_config_with_volume(0.0)),
+            "♪ ▱▱▱▱▱▱▱▱▱▱ 0%"
+        );
+    }
+
+    #[test]
+    fn sound_volume_status_shows_muted_when_disabled_regardless_of_volume() {
+        let sound = crate::config::SoundConfig {
+            volume: 0.8,
+            enabled: false,
+            ..crate::config::SoundConfig::default()
+        };
+        assert_eq!(render_sound_volume_status(&sound), "♪ muted");
+    }
+
+    #[test]
+    fn sound_volume_tab_bar_entry_configures_and_refreshes_live() {
+        let mut app = test_app();
+        app.state.sound.volume = 0.5;
+        app.configure_tab_bar_status(&[TabBarRightEntryConfig::SoundVolume], " ");
+        assert_eq!(
+            app.state.tab_bar_right,
+            vec![TabBarStatusSegment::Text(Some(
+                "♪ ▰▰▰▰▰▱▱▱▱▱ 50%".to_string()
+            ))]
+        );
+
+        app.state.sound.volume = 0.9;
+        let changed = app.refresh_sound_volume_tab_bar_segments();
+        assert!(changed);
+        assert_eq!(
+            app.state.tab_bar_right,
+            vec![TabBarStatusSegment::Text(Some(
+                "♪ ▰▰▰▰▰▰▰▰▰▱ 90%".to_string()
+            ))]
+        );
+
+        // No-op refresh (volume unchanged) reports no change.
+        assert!(!app.refresh_sound_volume_tab_bar_segments());
+    }
+
+    #[test]
+    fn sound_volume_tab_bar_refresh_is_a_no_op_without_a_configured_segment() {
+        let mut app = test_app();
+        assert!(!app.refresh_sound_volume_tab_bar_segments());
     }
 }

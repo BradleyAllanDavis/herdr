@@ -10,6 +10,7 @@ pub mod plugins;
 pub mod response;
 pub mod server;
 pub mod session;
+pub mod sound;
 pub mod tabs;
 pub mod workspaces;
 pub mod worktrees;
@@ -24,6 +25,7 @@ pub use plugins::*;
 pub use response::*;
 pub use server::*;
 pub use session::*;
+pub use sound::*;
 pub use tabs::*;
 pub use workspaces::*;
 pub use worktrees::*;
@@ -57,6 +59,12 @@ pub enum Method {
     ServerAgentManifests(EmptyParams),
     #[serde(rename = "server.reload_agent_manifests")]
     ServerReloadAgentManifests(EmptyParams),
+    #[serde(rename = "sound.volume.get")]
+    SoundVolumeGet(EmptyParams),
+    #[serde(rename = "sound.volume.set")]
+    SoundVolumeSet(SoundVolumeSetParams),
+    #[serde(rename = "sound.volume.step")]
+    SoundVolumeStep(SoundVolumeStepParams),
     #[serde(rename = "notification.show")]
     NotificationShow(NotificationShowParams),
     #[serde(rename = "product_announcement.dismiss")]

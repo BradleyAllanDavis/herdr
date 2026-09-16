@@ -111,6 +111,8 @@ impl HeadlessServer {
         let agent = known_agent
             .map(crate::detect::agent_label)
             .map(str::to_owned);
+        let volume =
+            sound.is_some().then(|| sound_volume_percent(self.app.state.sound.effective_volume()));
         self.send_to_client_shells(ServerMessage::SemanticNotification(
             protocol::SemanticNotification {
                 kind: semantic_kind,
@@ -122,6 +124,7 @@ impl HeadlessServer {
                 tab_id: Some(tab_id),
                 pane_id: Some(public_pane_id),
                 position: None,
+                volume,
             },
         ))
     }
@@ -225,10 +228,17 @@ impl HeadlessServer {
         message: impl Into<String>,
         body: Option<String>,
     ) -> bool {
+        // Every Sound-kind Notify carries the server's current live volume —
+        // this is the one funnel every NotifyKind::Sound emission site in
+        // this file (and headless.rs) goes through, so none of them need to
+        // thread volume through individually.
+        let volume = matches!(kind, protocol::NotifyKind::Sound)
+            .then(|| sound_volume_percent(self.app.state.sound.effective_volume()));
         self.send_to_foreground_client(ServerMessage::Notify {
             kind,
             message: message.into(),
             body,
+            volume,
         })
     }
 
@@ -239,6 +249,43 @@ impl HeadlessServer {
     ) -> bool {
         let (title, body) = crate::terminal_notify::split_message(message.as_ref());
         self.send_notify_to_foreground_client(kind, title, body.map(str::to_string))
+    }
+
+    /// Broadcasts a "done" preview sound at the server's current live volume
+    /// to every attached client, after a `sound.volume.set`/
+    /// `sound.volume.step` request actually changed it — respects
+    /// `[ui.sound] enabled` (no preview when sound is off). Reaches both
+    /// client types without a double-fire for either: raw terminal-ANSI
+    /// clients only ever act on `ServerMessage::Notify` (client-shell
+    /// clients ignore it — see `client::mod`'s `state.shell.is_none()`
+    /// guard), client-shell clients only ever act on `SemanticNotification`.
+    /// The tab bar's own `sound_volume` segment already refreshed
+    /// synchronously in `App::set_sound_volume`, riding along with this same
+    /// request's normal state push — this call is purely the audible half.
+    pub(super) fn broadcast_sound_volume_preview(&mut self) {
+        if !self.app.state.sound.enabled {
+            return;
+        }
+        self.send_notify_to_foreground_client(
+            protocol::NotifyKind::Sound,
+            sound_notify_message(crate::sound::Sound::Done),
+            None,
+        );
+        let volume = self.app.state.sound.effective_volume();
+        self.send_to_client_shells(ServerMessage::SemanticNotification(
+            protocol::SemanticNotification {
+                kind: protocol::SemanticNotificationKind::Custom,
+                title: format!("♪ volume {}%", (volume * 100.0).round() as i64),
+                body: None,
+                sound: Some(protocol::SemanticNotificationSound::Done),
+                agent: None,
+                workspace_id: None,
+                tab_id: None,
+                pane_id: None,
+                position: None,
+                volume: Some(sound_volume_percent(volume)),
+            },
+        ));
     }
 
     pub(super) fn handle_notification_show_api(
@@ -284,6 +331,8 @@ impl HeadlessServer {
                 Some(protocol::SemanticNotificationSound::Request)
             }
         };
+        let volume =
+            sound.is_some().then(|| sound_volume_percent(self.app.state.sound.effective_volume()));
         let shown = self.send_to_client_shells(ServerMessage::SemanticNotification(
             protocol::SemanticNotification {
                 kind: protocol::SemanticNotificationKind::Custom,
@@ -295,6 +344,7 @@ impl HeadlessServer {
                 tab_id: None,
                 pane_id: None,
                 position: params.position,
+                volume,
             },
         ));
         if shown {
@@ -574,6 +624,7 @@ impl HeadlessServer {
                         tab_id: None,
                         pane_id: None,
                         position: None,
+                        volume: None,
                     },
                 ));
 

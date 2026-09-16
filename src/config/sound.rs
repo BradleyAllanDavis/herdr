@@ -6,7 +6,7 @@ use crate::detect::Agent;
 
 use super::io::resolve_config_relative_path;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct SoundConfig {
     pub enabled: bool,
@@ -19,6 +19,10 @@ pub struct SoundConfig {
     /// Optional mp3 file path for "request" notifications.
     /// Relative paths are resolved from the config file's directory.
     pub request_path: Option<PathBuf>,
+    /// Playback volume for all notification sounds, 0.0 (silent) to 1.0 (full
+    /// volume). Default: 1.0 (matches pre-existing behavior). Out-of-range
+    /// values are clamped; see `effective_volume`/`volume_diagnostic`.
+    pub volume: f32,
     pub agents: AgentSoundOverrides,
 }
 
@@ -66,6 +70,22 @@ impl SoundConfig {
         !matches!(self.agents.for_agent(agent), AgentSoundSetting::Off)
     }
 
+    /// Volume clamped to the valid `0.0..=1.0` range. Always use this (never
+    /// the raw `volume` field) for anything that actually plays a sound.
+    pub fn effective_volume(&self) -> f32 {
+        self.volume.clamp(0.0, 1.0)
+    }
+
+    pub fn volume_diagnostic(&self) -> Option<String> {
+        let clamped = self.effective_volume();
+        (clamped != self.volume).then(|| {
+            format!(
+                "ui.sound.volume must be between 0.0 and 1.0 (got {}); using {clamped}",
+                self.volume
+            )
+        })
+    }
+
     pub fn path_for(&self, sound: crate::sound::Sound) -> Option<PathBuf> {
         let path = match sound {
             crate::sound::Sound::Done => self.done_path.as_ref().or(self.path.as_ref()),
@@ -77,6 +97,7 @@ impl SoundConfig {
 
     pub fn diagnostics(&self) -> Vec<String> {
         let mut diagnostics = Vec::new();
+        diagnostics.extend(self.volume_diagnostic());
         for (field, path) in [
             ("ui.sound.path", self.path.as_ref()),
             ("ui.sound.done_path", self.done_path.as_ref()),
@@ -156,6 +177,7 @@ impl Default for SoundConfig {
             path: None,
             done_path: None,
             request_path: None,
+            volume: 1.0,
             agents: AgentSoundOverrides::default(),
         }
     }
@@ -277,5 +299,66 @@ path = "sounds/notification.wav"
         assert!(diagnostics.iter().any(|diag| {
             diag.contains("ui.sound.path") && diag.contains("expected an mp3 file")
         }));
+    }
+
+    #[test]
+    fn volume_defaults_to_full_when_unset() {
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.ui.sound.volume, 1.0);
+        assert_eq!(config.ui.sound.effective_volume(), 1.0);
+        assert!(config.ui.sound.volume_diagnostic().is_none());
+    }
+
+    #[test]
+    fn volume_parses_within_range() {
+        let config: Config = toml::from_str(
+            r#"
+[ui.sound]
+volume = 0.35
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.ui.sound.volume, 0.35);
+        assert_eq!(config.ui.sound.effective_volume(), 0.35);
+        assert!(config.ui.sound.volume_diagnostic().is_none());
+    }
+
+    #[test]
+    fn out_of_range_volume_is_clamped_with_diagnostic() {
+        let config: Config = toml::from_str(
+            r#"
+[ui.sound]
+volume = 1.5
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.ui.sound.volume, 1.5);
+        assert_eq!(config.ui.sound.effective_volume(), 1.0);
+        let diagnostics = config.collect_diagnostics();
+        assert!(diagnostics
+            .iter()
+            .any(|diag| diag.contains("ui.sound.volume") && diag.contains("using 1")));
+
+        let config: Config = toml::from_str(
+            r#"
+[ui.sound]
+volume = -0.2
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.ui.sound.effective_volume(), 0.0);
+    }
+
+    #[test]
+    fn zero_volume_is_valid_and_silent() {
+        let config: Config = toml::from_str(
+            r#"
+[ui.sound]
+volume = 0.0
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.ui.sound.effective_volume(), 0.0);
+        assert!(config.ui.sound.volume_diagnostic().is_none());
     }
 }

@@ -24,6 +24,8 @@ pub(crate) fn request_changes_ui(request: &Request) -> bool {
         &request.method,
         Method::ServerReloadConfig(_)
             | Method::ServerReloadAgentManifests(_)
+            | Method::SoundVolumeSet(_)
+            | Method::SoundVolumeStep(_)
             | Method::NotificationShow(_)
             | Method::ProductAnnouncementDismiss(_)
             | Method::ReleaseNotesDismiss(_)

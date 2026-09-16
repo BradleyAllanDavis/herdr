@@ -40,6 +40,7 @@ pub(super) fn command() -> Command {
         .subcommand(worktree_command())
         .subcommand(tab_command())
         .subcommand(notification_command())
+        .subcommand(sound_command())
         .subcommand(agent_command())
         .subcommand(pane_command())
         .subcommand(terminal_command())
@@ -310,6 +311,23 @@ fn notification_command() -> Command {
                     "bottom-right",
                 ]))
                 .arg(option("sound", "SOUND").value_parser(["none", "done", "request"])),
+        )
+}
+
+fn sound_command() -> Command {
+    Command::new("sound")
+        .about("Inspect and adjust the live server notification-sound volume")
+        .subcommand(
+            Command::new("volume")
+                .about("Print or change the server's live notification-sound volume")
+                .arg(flag("json"))
+                .subcommand(
+                    Command::new("set")
+                        .about("Set the live volume (0.0-1.0)")
+                        .arg(required("volume", "VOLUME")),
+                )
+                .subcommand(Command::new("up").about("Raise the live volume by one step"))
+                .subcommand(Command::new("down").about("Lower the live volume by one step")),
         )
 }
 

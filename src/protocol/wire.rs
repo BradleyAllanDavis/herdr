@@ -1319,6 +1319,14 @@ pub struct SemanticNotification {
     pub tab_id: Option<String>,
     pub pane_id: Option<String>,
     pub position: Option<crate::config::ToastHerdrPosition>,
+    /// Server-authoritative playback volume for `sound`, as an integer
+    /// percent (0-100; not a float, so this struct can keep deriving `Eq`).
+    /// `#[serde(default)]` so a peer that predates this field (older client
+    /// or older server) still deserializes fine — absent means "no
+    /// server-provided volume", and the receiving client falls back to its
+    /// own local `[ui.sound] volume`.
+    #[serde(default)]
+    pub volume: Option<u8>,
 }
 
 /// Messages sent from the server to the client over the client protocol socket.
@@ -1361,6 +1369,13 @@ pub enum ServerMessage {
         message: String,
         /// Optional human-readable notification body.
         body: Option<String>,
+        /// Server-authoritative playback volume when `kind` is `Sound`, as an
+        /// integer percent (0-100; not a float, so `ServerMessage` can keep
+        /// deriving `Eq`). `#[serde(default)]` for back-compat with a peer
+        /// that predates this field — absent means "fall back to the
+        /// client's own local `[ui.sound] volume`".
+        #[serde(default)]
+        volume: Option<u8>,
     },
 
     /// OSC 52 clipboard data forwarded from a PTY through the server.
@@ -2715,6 +2730,7 @@ mod tests {
             tab_id: Some("w1:t1".into()),
             pane_id: Some("w1:p1".into()),
             position: Some(crate::config::ToastHerdrPosition::TopRight),
+            volume: Some(60),
         });
         let encoded = bincode::serde::encode_to_vec(&msg, bincode::config::standard()).unwrap();
         let (decoded, _): (ServerMessage, _) =
@@ -2733,12 +2749,103 @@ mod tests {
                 kind,
                 message: "agent done".to_owned(),
                 body: None,
+                volume: Some(75),
             };
             let encoded = bincode::serde::encode_to_vec(&msg, bincode::config::standard()).unwrap();
             let (decoded, _): (ServerMessage, _) =
                 bincode::serde::decode_from_slice(&encoded, bincode::config::standard()).unwrap();
             assert_eq!(msg, decoded);
         }
+    }
+
+    #[test]
+    fn server_notify_none_volume_roundtrips() {
+        let msg = ServerMessage::Notify {
+            kind: NotifyKind::Toast,
+            message: "agent done".to_owned(),
+            body: None,
+            volume: None,
+        };
+        let encoded = bincode::serde::encode_to_vec(&msg, bincode::config::standard()).unwrap();
+        let (decoded, _): (ServerMessage, _) =
+            bincode::serde::decode_from_slice(&encoded, bincode::config::standard()).unwrap();
+        assert_eq!(msg, decoded);
+    }
+
+    /// A pre-volume-field peer's exact `SemanticNotification` wire shape —
+    /// every field up to but not including the trailing `volume` field this
+    /// change added — used to simulate an older server/client talking to
+    /// code that now expects that field. bincode's serde integration decodes
+    /// structs via `visit_seq`: when the byte sequence ends before a
+    /// trailing `#[serde(default)]` field, serde substitutes the default
+    /// instead of erroring, which is exactly why `volume` was appended at
+    /// the end of the real struct (and of `ServerMessage::Notify`) rather
+    /// than inserted elsewhere — see this codebase's existing
+    /// `ServerCapabilities` struct for the same established idiom.
+    #[derive(serde::Serialize)]
+    struct PreVolumeSemanticNotification {
+        kind: SemanticNotificationKind,
+        title: String,
+        body: Option<String>,
+        sound: Option<SemanticNotificationSound>,
+        agent: Option<String>,
+        workspace_id: Option<String>,
+        tab_id: Option<String>,
+        pane_id: Option<String>,
+        position: Option<crate::config::ToastHerdrPosition>,
+    }
+
+    #[test]
+    fn semantic_notification_missing_volume_field_defaults_to_none() {
+        let old = PreVolumeSemanticNotification {
+            kind: SemanticNotificationKind::Finished,
+            title: "agent done".to_owned(),
+            body: None,
+            sound: Some(SemanticNotificationSound::Done),
+            agent: Some("claude".to_owned()),
+            workspace_id: None,
+            tab_id: None,
+            pane_id: None,
+            position: None,
+        };
+        let encoded = bincode::serde::encode_to_vec(&old, bincode::config::standard()).unwrap();
+        let (decoded, _): (SemanticNotification, _) =
+            bincode::serde::decode_from_slice(&encoded, bincode::config::standard()).unwrap();
+        assert_eq!(
+            decoded,
+            SemanticNotification {
+                kind: SemanticNotificationKind::Finished,
+                title: "agent done".to_owned(),
+                body: None,
+                sound: Some(SemanticNotificationSound::Done),
+                agent: Some("claude".to_owned()),
+                workspace_id: None,
+                tab_id: None,
+                pane_id: None,
+                position: None,
+                volume: None,
+            }
+        );
+    }
+
+    #[test]
+    fn semantic_notification_with_volume_roundtrips() {
+        let event = SemanticNotification {
+            kind: SemanticNotificationKind::Finished,
+            title: "agent done".to_owned(),
+            body: None,
+            sound: Some(SemanticNotificationSound::Done),
+            agent: None,
+            workspace_id: None,
+            tab_id: None,
+            pane_id: None,
+            position: None,
+            volume: Some(42),
+        };
+        let encoded = bincode::serde::encode_to_vec(&event, bincode::config::standard()).unwrap();
+        let (decoded, _): (SemanticNotification, _) =
+            bincode::serde::decode_from_slice(&encoded, bincode::config::standard()).unwrap();
+        assert_eq!(event, decoded);
     }
 
     #[test]

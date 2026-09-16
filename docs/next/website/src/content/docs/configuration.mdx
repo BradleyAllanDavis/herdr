@@ -313,12 +313,13 @@ tab_bar_right = [
   { type = "hostname" },
   { type = "datetime", format = "%H:%M" },
   { type = "text", text = "prod" },
+  { type = "sound_volume" },
   { type = "command", command = "~/.config/herdr/status.sh", interval_seconds = 5, timeout_seconds = 2 },
 ]
 tab_bar_right_separator = " · "
 ```
 
-The status area is empty by default. Add `zoom` to show a fixed `ZOOM` pill while the active tab is zoomed; the existing per-tab `Z` markers remain independent. `hostname`, `datetime`, and `command` resolve on the Herdr server, so `herdr --remote` shows the remote machine's values. Datetime entries use `strftime` formatting; directives that require a UTC offset or Unix timestamp, such as `%z` and `%s`, are rejected because the value is server-local wall-clock time.
+The status area is empty by default. Add `zoom` to show a fixed `ZOOM` pill while the active tab is zoomed; the existing per-tab `Z` markers remain independent. `hostname`, `datetime`, `sound_volume`, and `command` resolve on the Herdr server, so `herdr --remote` shows the remote machine's values. Datetime entries use `strftime` formatting; directives that require a UTC offset or Unix timestamp, such as `%z` and `%s`, are rejected because the value is server-local wall-clock time. `sound_volume` renders the server's live notification-sound volume, e.g. `♪ ▰▰▰▰▱▱▱▱▱▱ 35%` (10 cells, filled count is `round(volume * 10)`), or `♪ muted` when `ui.sound.enabled = false`; it refreshes immediately on any live change (`herdr sound volume set/up/down`, or the `sound_volume_up`/`sound_volume_down` keybind actions — unbound by default), not just on the next `reload-config`.
 
 Command entries run immediately and then at `interval_seconds` without blocking rendering or overlapping a previous run. The interval can be 1–31,536,000 seconds and the timeout can be 1–3,600 seconds. Herdr uses the last line of successful output, removes ESC-prefixed terminal control sequences instead of interpreting styles, clears the entry after failure, empty output, or `timeout_seconds`, and provides the same active workspace, tab, pane, socket, binary, and working-directory context as custom command keybindings. Commands are supported on Linux, macOS, and Windows, using `/bin/sh -lc` on Linux and macOS and `cmd.exe /d /c` on Windows.
 
@@ -487,16 +488,21 @@ On macOS, `system` tries `terminal-notifier` first and falls back to `/usr/bin/o
 
 ## Sound
 
-Sound notifications play through the local Herdr client. Custom sounds must be mp3 files; Herdr resolves relative paths from the config file's directory.
+Sound notification playback (which audio player runs) always happens on the local Herdr client machine. Custom sounds must be mp3 files; Herdr resolves relative paths from the config file's directory.
 
 ```toml
 [ui.sound]
 path = "sounds/notification.mp3"
 done_path = "sounds/done.mp3"
 request_path = "sounds/request.mp3"
+volume = 0.7
 ```
 
 `path` sets one sound for all sound notifications. `done_path` and `request_path` override only the finished and needs-input sounds.
+
+`volume` (`0.0`–`1.0`, default `1.0`) is server-authoritative: the connected server carries its own live volume with every sound notification it sends, and the client plays at that volume rather than its own local `[ui.sound] volume` — so a client attached with `herdr --remote` matches the server's volume, not the client machine's config file. A client with no server-provided volume (an older peer, or a raw client with no server connection at all) falls back to its own local `volume` unchanged. Out-of-range values are clamped, with a config diagnostic.
+
+Adjust the live server volume without editing config.toml: `herdr sound volume` (print), `herdr sound volume set <0.0-1.0>`, `herdr sound volume up`/`down` (0.1 steps, floored at `0.05` — a live step never reaches fully silent, only `set 0` or a config edit can), or bind `sound_volume_up`/`sound_volume_down` under `[keys]` (unbound by default). A live adjustment survives both `herdr server reload-config` (config.toml's own `volume` only re-applies if you actually changed it there) and a full server restart. Add `{ type = "sound_volume" }` to `tab_bar_right` (see above) to see the current level at a glance.
 
 Per-agent sound overrides accept `default`, `on`, or `off`. Use detected agent labels such as `claude`, `codex`, `devin`, or `droid` as keys. Droid is muted by default.
 

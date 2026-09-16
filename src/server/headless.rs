@@ -102,6 +102,14 @@ fn sound_notify_message(sound: crate::sound::Sound) -> &'static str {
     }
 }
 
+/// Converts a live `0.0..=1.0` volume to the integer-percent wire
+/// representation carried by `ServerMessage::Notify`/`SemanticNotification`
+/// (an integer so those types can keep deriving `Eq` — see their doc
+/// comments in `protocol::wire`).
+fn sound_volume_percent(volume: f32) -> u8 {
+    (volume.clamp(0.0, 1.0) * 100.0).round() as u8
+}
+
 fn notification_show_result(
     id: String,
     shown: bool,
@@ -2118,6 +2126,7 @@ impl HeadlessServer {
                         kind: protocol::NotifyKind::Toast,
                         message: "Paste rejected".to_owned(),
                         body: Some(detail),
+                        volume: None,
                     }
                 };
                 self.send_to_client(client_id, message);
@@ -3001,6 +3010,7 @@ impl HeadlessServer {
         // bypasses drain_internal_events_with_forwarding. Headless mode disables
         // local sound playback, so sound notifications need to be forwarded here.
         let toast_before = self.app.state.toast.clone();
+        let sound_volume_before = self.app.state.sound.volume;
         let pane_states_before: Vec<(
             usize,
             crate::layout::PaneId,
@@ -3130,6 +3140,19 @@ impl HeadlessServer {
 
         if let Some(revision_before) = pane_graphics_revision_before {
             changed |= revision_before != self.app.pane_graphics.revision();
+        }
+
+        // A sound.volume.set/step request that actually changed the live
+        // volume gets a preview-sound broadcast (item 5's "no-op at the
+        // ceiling/floor shouldn't beep" requirement — the tab-bar refresh
+        // already happened synchronously inside the request handler itself,
+        // riding along with the normal state push via `changed` above).
+        if matches!(
+            &msg.request.method,
+            api::schema::Method::SoundVolumeSet(_) | api::schema::Method::SoundVolumeStep(_)
+        ) && self.app.state.sound.volume != sound_volume_before
+        {
+            self.broadcast_sound_volume_preview();
         }
 
         // Forward new toast state only when a client-local delivery mode is selected.

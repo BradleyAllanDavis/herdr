@@ -758,6 +758,12 @@ pub(crate) enum ClientShellNotificationEffect {
     Sound {
         sound: crate::sound::Sound,
         agent: Option<String>,
+        /// Server-authoritative volume (0.0..=1.0) carried by the
+        /// `SemanticNotification` this effect was derived from, if the
+        /// server provided one. `None` means the peer predates this field
+        /// (or genuinely has nothing to say) — the caller falls back to its
+        /// own local `[ui.sound] volume`.
+        volume: Option<f32>,
     },
     Terminal {
         title: String,

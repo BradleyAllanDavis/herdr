@@ -51,6 +51,7 @@ mod selection;
 mod server;
 mod session;
 mod sound;
+mod sound_volume_state;
 mod terminal;
 mod terminal_effects;
 mod terminal_modes;
@@ -188,6 +189,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # resize_pane_up = ""     # optional, e.g. "ctrl+shift+alt+up"
 # resize_pane_right = ""  # optional, e.g. "ctrl+shift+alt+right"
 # toggle_sidebar = "prefix+b"
+# sound_volume_up = ""    # optional, e.g. "prefix+shift+equal" raises the live server volume by one step
+# sound_volume_down = ""  # optional, e.g. "prefix+shift+minus" lowers the live server volume by one step
 
 # Navigate-mode movement. These local shortcuts win while navigate mode is open.
 # They are independent from focus_pane_*. Do not include prefix+, esc, enter, tab, or 1..9 here.
@@ -317,8 +320,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # tab_bar_position = "top"
 
 # Ordered status entries at the right edge of the desktop tab bar.
-# Supported types: zoom, hostname, datetime, text, and command.
-# Hostname, datetime, and command entries resolve on the Herdr server.
+# Supported types: zoom, hostname, datetime, text, sound_volume, and command.
+# Hostname, datetime, sound_volume, and command entries resolve on the Herdr server.
+# sound_volume renders e.g. "♪ ▰▰▰▰▱▱▱▱▱▱ 35%", or "♪ muted" when ui.sound.enabled = false.
 # tab_bar_right = []
 # tab_bar_right_separator = " "
 
@@ -386,6 +390,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # path = "sounds/notification.mp3"   # one mp3 file for all sound notifications
 # done_path = "sounds/done.mp3"      # overrides only finished notifications
 # request_path = "sounds/request.mp3" # overrides only needs-attention notifications
+# Playback volume, 0.0 (silent) to 1.0 (full volume). Server-authoritative: carried to
+# every connected client (including over --remote) with each sound. Live-adjustable via
+# the sound_volume_up/sound_volume_down keybind actions above or `herdr sound volume set`,
+# and survives both `herdr server reload-config` and a full server restart.
+# volume = 1.0
 
 # Per-agent overrides: default | on | off
 # By default, droid is muted.

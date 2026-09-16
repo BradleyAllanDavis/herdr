@@ -952,6 +952,44 @@ impl App {
                     },
                 }
             }
+            Method::SoundVolumeGet(_) => SuccessResponse {
+                id: request.id,
+                result: ResponseResult::SoundVolume {
+                    volume: self.state.sound.volume,
+                    enabled: self.state.sound.enabled,
+                },
+            },
+            Method::SoundVolumeSet(params) => {
+                self.set_sound_volume(params.volume);
+                SuccessResponse {
+                    id: request.id,
+                    result: ResponseResult::SoundVolume {
+                        volume: self.state.sound.volume,
+                        enabled: self.state.sound.enabled,
+                    },
+                }
+            }
+            Method::SoundVolumeStep(params) => {
+                const SOUND_VOLUME_STEP: f32 = 0.1;
+                const SOUND_VOLUME_STEP_FLOOR: f32 = 0.05;
+                let delta = match params.direction {
+                    crate::api::schema::SoundVolumeStepDirection::Up => SOUND_VOLUME_STEP,
+                    crate::api::schema::SoundVolumeStepDirection::Down => -SOUND_VOLUME_STEP,
+                };
+                // Tighter floor than SoundVolumeSet's 0.0..=1.0: a live
+                // up/down step never reaches fully silent, only an explicit
+                // `sound.volume.set 0`/config edit can.
+                let target = (self.state.sound.volume + delta)
+                    .clamp(SOUND_VOLUME_STEP_FLOOR, 1.0);
+                self.set_sound_volume(target);
+                SuccessResponse {
+                    id: request.id,
+                    result: ResponseResult::SoundVolume {
+                        volume: self.state.sound.volume,
+                        enabled: self.state.sound.enabled,
+                    },
+                }
+            }
             Method::NotificationShow(params) => {
                 return self.handle_notification_show(request.id, params);
             }
@@ -2449,5 +2487,99 @@ mod tests {
             app.state.toast.as_ref().map(|toast| toast.context.as_str()),
             Some("__herdr_original__ · 1")
         );
+    }
+
+    fn sound_volume_test_app() -> App {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        )
+    }
+
+    fn sound_volume_request(method: crate::api::schema::Method) -> crate::api::schema::Request {
+        crate::api::schema::Request {
+            id: "sound-volume".into(),
+            method,
+        }
+    }
+
+    #[test]
+    fn sound_volume_get_reports_current_value_and_enabled() {
+        let mut app = sound_volume_test_app();
+        let response = app.handle_api_request(sound_volume_request(
+            crate::api::schema::Method::SoundVolumeGet(crate::api::schema::EmptyParams::default()),
+        ));
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["result"]["type"], "sound_volume");
+        assert_eq!(response["result"]["volume"], 1.0);
+        assert_eq!(response["result"]["enabled"], true);
+    }
+
+    #[test]
+    fn sound_volume_set_clamps_to_zero_one_range() {
+        let mut app = sound_volume_test_app();
+        let response = app.handle_api_request(sound_volume_request(
+            crate::api::schema::Method::SoundVolumeSet(crate::api::schema::SoundVolumeSetParams {
+                volume: 1.7,
+            }),
+        ));
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["result"]["volume"], 1.0);
+        assert_eq!(app.state.sound.volume, 1.0);
+
+        let response = app.handle_api_request(sound_volume_request(
+            crate::api::schema::Method::SoundVolumeSet(crate::api::schema::SoundVolumeSetParams {
+                volume: -0.3,
+            }),
+        ));
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["result"]["volume"], 0.0);
+        assert_eq!(app.state.sound.volume, 0.0);
+    }
+
+    #[test]
+    fn sound_volume_step_moves_by_one_tenth_and_floors_at_five_percent() {
+        let mut app = sound_volume_test_app();
+        app.state.sound.volume = 0.1;
+
+        let response = app.handle_api_request(sound_volume_request(
+            crate::api::schema::Method::SoundVolumeStep(
+                crate::api::schema::SoundVolumeStepParams {
+                    direction: crate::api::schema::SoundVolumeStepDirection::Down,
+                },
+            ),
+        ));
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        // 0.1 - 0.1 = 0.0, floored to the tighter 0.05 step floor (not 0.0 —
+        // that's SoundVolumeSet's floor, a live step never reaches silent).
+        assert_eq!(response["result"]["volume"], 0.05);
+        assert_eq!(app.state.sound.volume, 0.05);
+
+        // Stepping down again is a no-op at the floor.
+        let response = app.handle_api_request(sound_volume_request(
+            crate::api::schema::Method::SoundVolumeStep(
+                crate::api::schema::SoundVolumeStepParams {
+                    direction: crate::api::schema::SoundVolumeStepDirection::Down,
+                },
+            ),
+        ));
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["result"]["volume"], 0.05);
+
+        app.state.sound.volume = 0.95;
+        let response = app.handle_api_request(sound_volume_request(
+            crate::api::schema::Method::SoundVolumeStep(
+                crate::api::schema::SoundVolumeStepParams {
+                    direction: crate::api::schema::SoundVolumeStepDirection::Up,
+                },
+            ),
+        ));
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["result"]["volume"], 1.0);
+        assert_eq!(app.state.sound.volume, 1.0);
     }
 }

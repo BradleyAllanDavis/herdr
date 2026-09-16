@@ -73,6 +73,7 @@ pub(crate) struct AppPolicy {
     pub(crate) restore_session: bool,
     pub(crate) persist_session: bool,
     pub(crate) persist_plugin_registry: bool,
+    pub(crate) persist_sound_volume: bool,
     pub(crate) background_updates: bool,
 }
 
@@ -81,6 +82,7 @@ impl AppPolicy {
         restore_session: true,
         persist_session: true,
         persist_plugin_registry: true,
+        persist_sound_volume: true,
         background_updates: true,
     };
 
@@ -89,6 +91,7 @@ impl AppPolicy {
         restore_session: false,
         persist_session: false,
         persist_plugin_registry: false,
+        persist_sound_volume: false,
         background_updates: false,
     };
 
@@ -97,6 +100,7 @@ impl AppPolicy {
         restore_session: false,
         persist_session: true,
         persist_plugin_registry: true,
+        persist_sound_volume: true,
         background_updates: true,
     };
 }
@@ -143,6 +147,10 @@ pub struct App {
     tab_bar_status_generation: u64,
     tab_bar_datetimes: Vec<tab_bar_status::TabBarDatetimeRuntime>,
     tab_bar_commands: Vec<tab_bar_status::TabBarCommandRuntime>,
+    /// Indices into `state.tab_bar_right` of any `sound_volume` entries,
+    /// refreshed on demand (not on a timer) whenever the live volume changes
+    /// — see `set_sound_volume`/`refresh_sound_volume_tab_bar_segments`.
+    tab_bar_sound_volumes: Vec<usize>,
     next_tab_bar_datetime_refresh: Option<Instant>,
     /// Parsed `ui.window_title` plus the hostname resolved when it was applied.
     window_title_template: Option<(crate::config::WindowTitleTemplate, String)>,
@@ -156,6 +164,13 @@ pub struct App {
     pub(crate) full_redraw_pending: bool,
     pub(crate) overlay_panes: HashMap<crate::layout::PaneId, OverlayPaneState>,
     pub(crate) config_reloaded_from_disk: bool,
+    /// The `ui.sound.volume` value as last read from config.toml (at
+    /// startup, and on every subsequent reload) — independent of
+    /// `state.sound.volume`, which also tracks live `sound_volume_up`/
+    /// `sound_volume_down` adjustments. Reload compares the two to decide
+    /// whether the operator actually edited the config (apply it) or the
+    /// value in the file is unchanged (keep the live adjustment).
+    pub(crate) sound_volume_config_baseline: f32,
     client_shell_keybindings_profile: Option<String>,
     endpoint_commands: custom_commands::EndpointCommandRegistry,
 }
@@ -185,6 +200,17 @@ fn load_plugin_registry(
         .into_iter()
         .map(|plugin| (plugin.plugin_id.clone(), plugin))
         .collect()
+}
+
+/// Initial live sound volume: the last-persisted in-session adjustment if
+/// one was ever saved, else the config's own volume. See the sticky-volume
+/// handling in `apply_live_config`, which keeps a live adjustment from being
+/// clobbered back to the config value on a mere `reload-config`.
+fn load_sound_volume(persist_sound_volume: bool, config_volume: f32) -> f32 {
+    if !persist_sound_volume {
+        return config_volume;
+    }
+    crate::sound_volume_state::load().unwrap_or(config_volume)
 }
 
 fn agent_panel_sort_from_config(
@@ -503,7 +529,12 @@ impl App {
             shell_mode: config.terminal.shell_mode,
             new_terminal_cwd: config.terminal.new_cwd.clone(),
             pane_scrollback_limit_bytes: config.advanced.scrollback_limit_bytes,
-            sound: config.ui.sound.clone(),
+            sound: {
+                let mut sound = config.ui.sound.clone();
+                sound.volume =
+                    load_sound_volume(policy.persist_sound_volume, config.ui.sound.volume);
+                sound
+            },
             toast_config: config.ui.toast.clone(),
             keybinds: config.keybinds(),
             palette: theme_palette,
@@ -605,6 +636,7 @@ impl App {
             tab_bar_status_generation: 0,
             tab_bar_datetimes: Vec::new(),
             tab_bar_commands: Vec::new(),
+            tab_bar_sound_volumes: Vec::new(),
             next_tab_bar_datetime_refresh: None,
             window_title_template: None,
             persist_pane_history: config.experimental.pane_history,
@@ -619,6 +651,7 @@ impl App {
             full_redraw_pending: false,
             overlay_panes: HashMap::new(),
             config_reloaded_from_disk: false,
+            sound_volume_config_baseline: config.ui.sound.volume,
             client_shell_keybindings_profile,
             endpoint_commands,
         };
@@ -745,6 +778,27 @@ impl App {
         self.apply_config_from_disk(true)
     }
 
+    /// Sets the live sound volume (clamped `0.0..=1.0`), persisting it (if
+    /// `policy.persist_sound_volume`) and refreshing any `sound_volume`
+    /// tab-bar segments immediately. Returns whether the value actually
+    /// changed — a no-op at the `sound_volume_up`/`down` step boundary
+    /// (already at the ceiling/floor) shouldn't trigger a preview-sound
+    /// broadcast, which the caller decides based on this return value.
+    pub(crate) fn set_sound_volume(&mut self, volume: f32) -> bool {
+        let volume = volume.clamp(0.0, 1.0);
+        if self.state.sound.volume == volume {
+            return false;
+        }
+        self.state.sound.volume = volume;
+        if self.policy.persist_sound_volume {
+            if let Err(err) = crate::sound_volume_state::save(volume) {
+                tracing::warn!(err = %err, "failed to persist sound volume");
+            }
+        }
+        self.refresh_sound_volume_tab_bar_segments();
+        true
+    }
+
     pub(crate) fn take_config_reloaded_from_disk(&mut self) -> bool {
         let reloaded = self.config_reloaded_from_disk;
         self.config_reloaded_from_disk = false;
@@ -850,7 +904,22 @@ impl App {
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
+                // Volume is sticky across reload: a live sound_volume_up/down
+                // adjustment must not get clobbered back to the config file's
+                // value on every reload-config, only when the operator
+                // actually edited ui.sound.volume in the file.
+                let live_volume = self.state.sound.volume;
+                let config_volume_changed =
+                    config.ui.sound.volume != self.sound_volume_config_baseline;
+                self.sound_volume_config_baseline = config.ui.sound.volume;
                 self.state.sound = config.ui.sound.clone();
+                if !config_volume_changed {
+                    self.state.sound.volume = live_volume;
+                } else if self.policy.persist_sound_volume {
+                    if let Err(err) = crate::sound_volume_state::save(self.state.sound.volume) {
+                        tracing::warn!(err = %err, "failed to persist sound volume");
+                    }
+                }
                 self.state.toast_config = config.ui.toast.clone();
             }
         }
@@ -1729,6 +1798,73 @@ mod tests {
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_preserves_live_sound_volume_when_config_value_unchanged() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-sound-volume-unchanged");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // No [ui.sound] section at all — volume stays at its 1.0 default,
+        // same as the app's own initial baseline (test_app() uses
+        // Config::default()).
+        std::fs::write(&path, "[terminal]\ndefault_shell = \"nu\"\n").unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+
+        let mut app = test_app();
+        assert_eq!(app.state.sound.volume, 1.0);
+        assert!(app.set_sound_volume(0.35));
+        assert_eq!(app.state.sound.volume, 0.35);
+
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        // Config's own volume (1.0, unset) didn't change vs. what was
+        // loaded before, so the live in-session adjustment survives.
+        assert_eq!(app.state.sound.volume, 0.35);
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_applies_sound_volume_when_operator_edits_it() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-sound-volume-changed");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "[terminal]\ndefault_shell = \"nu\"\n").unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+
+        let mut app = test_app();
+        assert!(app.set_sound_volume(0.35));
+
+        // The operator now edits ui.sound.volume in the file directly.
+        std::fs::write(
+            &path,
+            "[terminal]\ndefault_shell = \"nu\"\n[ui.sound]\nvolume = 0.6\n",
+        )
+        .unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(app.state.sound.volume, 0.6);
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn set_sound_volume_clamps_and_reports_whether_it_changed() {
+        let mut app = test_app();
+        assert_eq!(app.state.sound.volume, 1.0);
+
+        assert!(!app.set_sound_volume(1.5)); // clamps to 1.0, already there — no-op
+        assert_eq!(app.state.sound.volume, 1.0);
+
+        assert!(app.set_sound_volume(-0.5)); // clamps to 0.0, a real change
+        assert_eq!(app.state.sound.volume, 0.0);
+
+        assert!(app.set_sound_volume(0.42));
+        assert_eq!(app.state.sound.volume, 0.42);
+        assert!(!app.set_sound_volume(0.42)); // same value again — no-op
     }
 
     #[test]

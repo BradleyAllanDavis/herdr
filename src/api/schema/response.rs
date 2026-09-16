@@ -295,6 +295,10 @@ pub enum ResponseResult {
         status: crate::config::ConfigReloadStatus,
         diagnostics: Vec<String>,
     },
+    SoundVolume {
+        volume: f32,
+        enabled: bool,
+    },
     /// Acknowledgement for the client-shell surface interest lease. This method is new on the
     /// endpoint protocol, so its revision-bearing result can establish an activation floor.
     ClientShellSurfaceSet {
