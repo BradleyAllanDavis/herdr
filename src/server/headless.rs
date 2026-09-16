@@ -3011,6 +3011,10 @@ impl HeadlessServer {
         // local sound playback, so sound notifications need to be forwarded here.
         let toast_before = self.app.state.toast.clone();
         let sound_volume_before = self.app.state.sound.volume;
+        let is_sound_volume_request = matches!(
+            &msg.request.method,
+            api::schema::Method::SoundVolumeSet(_) | api::schema::Method::SoundVolumeStep(_)
+        );
         let pane_states_before: Vec<(
             usize,
             crate::layout::PaneId,
@@ -3147,11 +3151,7 @@ impl HeadlessServer {
         // ceiling/floor shouldn't beep" requirement — the tab-bar refresh
         // already happened synchronously inside the request handler itself,
         // riding along with the normal state push via `changed` above).
-        if matches!(
-            &msg.request.method,
-            api::schema::Method::SoundVolumeSet(_) | api::schema::Method::SoundVolumeStep(_)
-        ) && self.app.state.sound.volume != sound_volume_before
-        {
+        if is_sound_volume_request && self.app.state.sound.volume != sound_volume_before {
             self.broadcast_sound_volume_preview();
         }
 
