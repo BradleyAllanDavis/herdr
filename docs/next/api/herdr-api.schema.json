@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "protocol": 22,
+  "protocol": 23,
   "schema_version": 1,
   "schemas": {
     "error_response": {
@@ -3959,6 +3959,38 @@
           },
           "type": "object"
         },
+        "SoundVolumeSetParams": {
+          "description": "`sound.volume.set` params — sets the server's live notification-sound\nvolume directly. `volume` is clamped to `0.0..=1.0` server-side (the same\nrange as `[ui.sound] volume` in config.toml).",
+          "properties": {
+            "volume": {
+              "format": "float",
+              "type": "number"
+            }
+          },
+          "required": [
+            "volume"
+          ],
+          "type": "object"
+        },
+        "SoundVolumeStepDirection": {
+          "enum": [
+            "up",
+            "down"
+          ],
+          "type": "string"
+        },
+        "SoundVolumeStepParams": {
+          "description": "`sound.volume.step` params — nudges the server's live notification-sound\nvolume by one step (0.1), clamped to `0.05..=1.0` (a tighter floor than\n`sound.volume.set`'s `0.0..=1.0`: the live up/down step never reaches\nfully silent, only an explicit `set 0`/config edit can).",
+          "properties": {
+            "direction": {
+              "$ref": "#/schemas/request/$defs/SoundVolumeStepDirection"
+            }
+          },
+          "required": [
+            "direction"
+          ],
+          "type": "object"
+        },
         "SplitDirection": {
           "enum": [
             "right",
@@ -4835,6 +4867,54 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "sound.volume.get",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "sound.volume.set",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/SoundVolumeSetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "sound.volume.step",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/SoundVolumeStepParams"
             }
           },
           "required": [
@@ -10483,6 +10563,27 @@
                 "type",
                 "status",
                 "diagnostics"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "type": {
+                  "const": "sound_volume",
+                  "type": "string"
+                },
+                "volume": {
+                  "format": "float",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "type",
+                "volume",
+                "enabled"
               ],
               "type": "object"
             },
