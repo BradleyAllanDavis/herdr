@@ -6,8 +6,30 @@ use crate::protocol::NotifyKind;
 
 use super::shell;
 
+/// The platform helper blocks on an external program (`terminal-notifier` /
+/// `osascript` / `notify-send`), so run it off the input/render thread —
+/// same as sound playback — or the whole client freezes while it runs.
+/// (Windows already queues its native delivery upstream, see
+/// `queue_system_notification`.)
 #[cfg(not(windows))]
-use crate::platform::show_desktop_notification as show_untargeted_system_notification;
+fn show_untargeted_system_notification(title: &str, body: Option<&str>) -> io::Result<bool> {
+    show_desktop_notification_in_background(title.to_owned(), body.map(str::to_owned));
+    Ok(true)
+}
+
+#[cfg(not(windows))]
+fn show_desktop_notification_in_background(title: String, body: Option<String>) {
+    let spawned = std::thread::Builder::new()
+        .name("system-notify".into())
+        .spawn(move || {
+            if let Err(err) = crate::platform::show_desktop_notification(&title, body.as_deref()) {
+                warn!(err = %err, "failed to emit system notification");
+            }
+        });
+    if let Err(err) = spawned {
+        warn!(err = %err, "failed to spawn system notification thread");
+    }
+}
 
 #[cfg(windows)]
 fn queue_system_notification(
@@ -85,7 +107,7 @@ pub(super) fn handle_shell_notification_effects(
                 #[cfg(windows)]
                 let result = show_system_notification(&title, body.as_deref(), target, event_tx);
                 #[cfg(not(windows))]
-                let result = crate::platform::show_desktop_notification(&title, body.as_deref());
+                let result = show_untargeted_system_notification(&title, body.as_deref());
                 if let Err(err) = result {
                     warn!(err = %err, "failed to emit system notification");
                 }
@@ -151,6 +173,22 @@ pub(super) fn handle_notify(
         crate::terminal_notify::show_notification,
         show_untargeted_system_notification,
     );
+}
+
+/// The platform helper blocks on an external program (`terminal-notifier` /
+/// `osascript` / `notify-send`), so run it off the input/render thread —
+/// same as sound playback — or the whole client freezes while it runs.
+fn show_desktop_notification_in_background(title: String, body: Option<String>) {
+    let spawned = std::thread::Builder::new()
+        .name("system-notify".into())
+        .spawn(move || {
+            if let Err(err) = crate::platform::show_desktop_notification(&title, body.as_deref()) {
+                warn!(err = %err, "failed to emit system notification");
+            }
+        });
+    if let Err(err) = spawned {
+        warn!(err = %err, "failed to spawn system notification thread");
+    }
 }
 
 pub(super) fn handle_notify_with_notifiers(
