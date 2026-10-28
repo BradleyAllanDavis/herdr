@@ -579,7 +579,7 @@ pub(super) fn render_expanded(
     );
 }
 
-fn active_endpoint_label<'a>(state: &'a ShellRenderState<'_>) -> &'a str {
+pub(super) fn active_endpoint_label<'a>(state: &'a ShellRenderState<'_>) -> &'a str {
     state
         .endpoints
         .iter()

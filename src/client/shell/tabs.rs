@@ -12,9 +12,20 @@ pub(crate) fn render_tab_bar(
     tab_scroll: &mut usize,
     reveal_focused_tab: &mut bool,
     tab_drag_insert_index: Option<usize>,
+    accent: Option<ratatui::style::Color>,
     hits: &mut ShellHitMap,
 ) {
-    let palette = &config.palette;
+    let tinted;
+    let palette = match accent {
+        Some(accent) => {
+            tinted = Palette {
+                accent,
+                ..config.palette.clone()
+            };
+            &tinted
+        }
+        None => &config.palette,
+    };
     buffer.set_style(area, Style::default().bg(palette.panel_bg));
     let tabs = snapshot
         .tabs

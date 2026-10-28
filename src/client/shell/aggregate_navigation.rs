@@ -126,7 +126,7 @@ pub(super) fn aggregate_agent_rows<'a>(
                 return rows;
             }
         }
-        sort_aggregate_rows(&mut rows, sort);
+        sort_aggregate_rows(endpoints, &mut rows, sort);
         return rows;
     }
 
@@ -152,22 +152,29 @@ pub(super) fn aggregate_agent_rows<'a>(
                 })
         })
         .collect::<Vec<_>>();
-    sort_aggregate_rows(&mut rows, sort);
+    sort_aggregate_rows(endpoints, &mut rows, sort);
     rows
 }
 
 fn sort_aggregate_rows(
+    endpoints: &[ClientShellEndpoint],
     rows: &mut [AggregateAgentRow<'_>],
     sort: crate::config::AgentPanelSortConfig,
 ) {
-    if sort == crate::config::AgentPanelSortConfig::Priority {
-        rows.sort_by_key(|row| {
-            (
-                row.endpoint.stale(),
-                std::cmp::Reverse(status_priority(row.agent.agent_status)),
-                std::cmp::Reverse(row.recency),
-            )
-        });
+    match sort {
+        crate::config::AgentPanelSortConfig::Priority => {
+            rows.sort_by_key(|row| {
+                (
+                    row.endpoint.stale(),
+                    std::cmp::Reverse(status_priority(row.agent.agent_status)),
+                    std::cmp::Reverse(row.recency),
+                )
+            });
+        }
+        crate::config::AgentPanelSortConfig::Machines => {
+            super::machine_groups::sort_by_machine(endpoints, rows);
+        }
+        crate::config::AgentPanelSortConfig::Spaces => {}
     }
 }
 

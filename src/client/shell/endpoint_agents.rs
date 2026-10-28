@@ -62,16 +62,33 @@ pub(super) fn render_expanded(
         return;
     }
     let rows = agent_rows(endpoints, active_endpoint_id, config);
+    let entries = list_entries(
+        rows,
+        super::machine_groups::wants_headers(endpoints, config),
+    );
     super::agent_sidebar::render_agent_list(
         buffer,
         area,
-        &rows,
+        &entries,
         agent_view_label.map(|_| " no matching agents"),
         config,
         agent_scroll,
         hits,
-        |row| row.agent.rows.len(),
-        |buffer, rect, row, hits| {
+        |entry| match entry {
+            ListEntry::Header { .. } => 1,
+            ListEntry::Agent(row) => row.agent.rows.len(),
+        },
+        |buffer, rect, entry, hits| {
+            let row = match entry {
+                // Headers register no hit area, so clicks on them fall through.
+                ListEntry::Header { label, stale } => {
+                    super::machine_groups::render_machine_header(
+                        buffer, rect, label, *stale, config,
+                    );
+                    return;
+                }
+                ListEntry::Agent(row) => row,
+            };
             super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, config);
             if row.stale {
                 buffer.set_style(
@@ -97,18 +114,29 @@ impl ClientShellState {
         if body_height == 0 {
             return;
         }
-        let rows = agent_rows(&self.endpoints, &self.active_endpoint_id, &self.config);
-        let Some(target) = rows
-            .iter()
-            .position(|row| &row.endpoint_id == endpoint_id && row.agent.pane_id == pane_id)
-        else {
+        // Same entries the panel renders, so machine headers count toward the
+        // scroll metrics and the target index matches what is on screen.
+        let entries = list_entries(
+            agent_rows(&self.endpoints, &self.active_endpoint_id, &self.config),
+            super::machine_groups::wants_headers(&self.endpoints, &self.config),
+        );
+        let Some(target) = entries.iter().position(|entry| {
+            matches!(
+                entry,
+                ListEntry::Agent(row)
+                    if &row.endpoint_id == endpoint_id && row.agent.pane_id == pane_id
+            )
+        }) else {
             return;
         };
-        let heights = rows
+        let heights = entries
             .iter()
-            .map(|row| row.agent.rows.len().max(1).min(u16::MAX as usize) as u16)
+            .map(|entry| match entry {
+                ListEntry::Header { .. } => 1,
+                ListEntry::Agent(row) => row.agent.rows.len().max(1).min(u16::MAX as usize) as u16,
+            })
             .collect::<Vec<_>>();
-        let mut gaps = vec![self.config.agents.row_gap; rows.len()];
+        let mut gaps = vec![self.config.agents.row_gap; entries.len()];
         if let Some(last) = gaps.last_mut() {
             *last = 0;
         }
@@ -120,6 +148,45 @@ impl ClientShellState {
             target,
         );
     }
+}
+
+/// One entry of the expanded agent list: a machine header or an agent.
+enum ListEntry {
+    Header { label: String, stale: bool },
+    Agent(EndpointAgentRow),
+}
+
+/// Wrap rows as list entries, opening a header whenever the endpoint changes.
+/// Headers are only drawn when every endpoint's rows form one contiguous run
+/// (true for the `machines` sort); an agent view with its own sort can
+/// interleave machines, and a header per run would then repeat a machine.
+fn list_entries(rows: Vec<EndpointAgentRow>, headers: bool) -> Vec<ListEntry> {
+    let headers = headers && endpoints_are_contiguous(&rows);
+    let mut entries = Vec::with_capacity(rows.len());
+    let mut previous: Option<ClientEndpointId> = None;
+    for row in rows {
+        if headers && previous.as_ref() != Some(&row.endpoint_id) {
+            previous = Some(row.endpoint_id.clone());
+            entries.push(ListEntry::Header {
+                label: row.machine_label.clone(),
+                stale: row.stale,
+            });
+        }
+        entries.push(ListEntry::Agent(row));
+    }
+    entries
+}
+
+fn endpoints_are_contiguous(rows: &[EndpointAgentRow]) -> bool {
+    let mut seen: Vec<&ClientEndpointId> = Vec::new();
+    for row in rows {
+        match seen.last() {
+            Some(last) if *last == &row.endpoint_id => {}
+            _ if seen.contains(&&row.endpoint_id) => return false,
+            _ => seen.push(&row.endpoint_id),
+        }
+    }
+    true
 }
 
 struct EndpointAgentRow {
