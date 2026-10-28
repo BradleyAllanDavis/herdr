@@ -33,7 +33,7 @@ impl ClientShellState {
             .iter()
             .find(|endpoint| endpoint.endpoint_id.is_local())
             .cloned()
-            .unwrap_or_else(local_endpoint);
+            .unwrap_or_else(|| local_endpoint(&self.config.local_label));
         next.push(local);
         for profile in profiles {
             let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
@@ -492,10 +492,19 @@ pub(super) fn endpoint_status_presentation(
     }
 }
 
-pub(super) fn local_endpoint() -> ClientShellEndpoint {
+/// `"<short host> (local)"`, or plain `"Local"` when the hostname is unknown.
+pub(super) fn local_endpoint_label(hostname: Option<&str>) -> String {
+    hostname
+        .and_then(|name| name.split('.').next())
+        .map(str::trim)
+        .filter(|short| !short.is_empty())
+        .map_or_else(|| "Local".to_owned(), |short| format!("{short} (local)"))
+}
+
+pub(super) fn local_endpoint(label: &str) -> ClientShellEndpoint {
     ClientShellEndpoint {
         endpoint_id: ClientEndpointId::Local,
-        label: "Local".into(),
+        label: label.to_owned(),
         status: ClientEndpointStatus::Online,
         snapshot: None,
         snapshot_generation: None,

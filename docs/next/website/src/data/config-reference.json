@@ -1078,7 +1078,7 @@
           "key": "ui.sidebar.agents.machine_header",
           "type": "token",
           "default": "unset",
-          "description": "Styling for the per-machine header rows drawn by agent_panel_sort = \"machines\". Must be the machine token, either as the string \"machine\" or an inline { token = \"machine\", fg, bold, dim, rules } table; rules match the machine label, for example rules = [{ equals = \"dozer\", fg = \"#dc322f\" }]. Unset renders the plain label in bold. Unreachable machines always use the dimmed stale style. When more than one machine is attached, the fg a rule gives the active machine also colors the tab bar's active tab and accent pills, so each machine keeps one color across the client."
+          "description": "Styling for the per-machine header rows drawn by agent_panel_sort = \"machines\". Must be the machine token, either as the string \"machine\" or an inline { token = \"machine\", fg, bold, dim, rules } table; rules match the machine label, for example rules = [{ equals = \"dozer\", fg = \"#dc322f\" }]. The local machine is labelled \"<host> (local)\", so use starts_with = \"<host>\" to cover both its local and remote view. Unset renders the plain label in bold. Unreachable machines always use the dimmed stale style. When more than one machine is attached, the fg a rule gives the active machine also colors the tab bar's active tab and accent pills, so each machine keeps one color across the client."
         },
         {
           "key": "ui.sidebar.agents.rows_by_agent",
