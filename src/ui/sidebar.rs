@@ -276,7 +276,10 @@ pub(crate) fn resolved_token_spans(
     spans
 }
 
-fn apply_token_style(mut style: Style, patch: crate::config::SidebarTokenStyle) -> Style {
+pub(crate) fn apply_token_style(
+    mut style: Style,
+    patch: crate::config::SidebarTokenStyle,
+) -> Style {
     if let Some(foreground) = patch.fg {
         style = style.fg(foreground.ratatui());
     }

@@ -18,6 +18,7 @@ mod global_menu;
 mod graphics;
 mod input;
 mod input_source;
+mod machine_groups;
 mod mobile;
 mod mouse;
 mod notification_policy;

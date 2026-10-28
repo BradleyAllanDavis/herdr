@@ -72,14 +72,20 @@ pub(super) fn aggregate_agent_rows(
                 })
         })
         .collect::<Vec<_>>();
-    if sort == crate::config::AgentPanelSortConfig::Priority {
-        rows.sort_by_key(|row| {
-            (
-                row.endpoint.stale(),
-                std::cmp::Reverse(status_priority(row.agent.agent_status)),
-                std::cmp::Reverse(row.recency),
-            )
-        });
+    match sort {
+        crate::config::AgentPanelSortConfig::Priority => {
+            rows.sort_by_key(|row| {
+                (
+                    row.endpoint.stale(),
+                    std::cmp::Reverse(status_priority(row.agent.agent_status)),
+                    std::cmp::Reverse(row.recency),
+                )
+            });
+        }
+        crate::config::AgentPanelSortConfig::Machines => {
+            super::machine_groups::sort_by_machine(endpoints, &mut rows);
+        }
+        crate::config::AgentPanelSortConfig::Spaces => {}
     }
     rows
 }

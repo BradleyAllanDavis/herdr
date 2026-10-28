@@ -1032,10 +1032,11 @@
           "key": "ui.agent_panel_sort",
           "type": "enum",
           "default": "\"spaces\"",
-          "description": "Agent sidebar ordering. Saved values are \"spaces\" or \"priority\"; \"workspaces\" is accepted as an alias for \"spaces\".",
+          "description": "Agent sidebar ordering. Saved values are \"spaces\", \"priority\", or \"machines\"; \"workspaces\" is accepted as an alias for \"spaces\". \"machines\" groups a federated client's agents under one header row per machine (Local first, then saved machines in catalog order, unreachable machines last) with priority ordering inside each group; with only the local machine it behaves like \"priority\". The sidebar sort toggle switches between spaces and priority only.",
           "values": [
             "spaces",
-            "priority"
+            "priority",
+            "machines"
           ]
         },
         {
@@ -1059,6 +1060,12 @@
           "type": "list of token rows",
           "default": "[[\"state_icon\", \"machine\", \"workspace\", \"tab\"], [\"agent\"]]",
           "description": "Default expanded Agent sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon accepts fixed styles only. At most 16 rows and 16 tokens per row."
+        },
+        {
+          "key": "ui.sidebar.agents.machine_header",
+          "type": "token",
+          "default": "unset",
+          "description": "Styling for the per-machine header rows drawn by agent_panel_sort = \"machines\". Must be the machine token, either as the string \"machine\" or an inline { token = \"machine\", fg, bold, dim, rules } table; rules match the machine label, for example rules = [{ equals = \"dozer\", fg = \"#dc322f\" }]. Unset renders the plain label in bold. Unreachable machines always use the dimmed stale style. When more than one machine is attached, the fg a rule gives the active machine also colors the tab bar's active tab and accent pills, so each machine keeps one color across the client."
         },
         {
           "key": "ui.sidebar.agents.rows_by_agent",

@@ -1902,7 +1902,17 @@ impl ClientShellState {
                         crate::config::AgentPanelSortConfig::Spaces => {
                             crate::config::AgentPanelSortConfig::Priority
                         }
-                        crate::config::AgentPanelSortConfig::Priority => {
+                        // `machines` only separates anything with a second endpoint
+                        // attached; without one the toggle stays two-state. A saved
+                        // click overrides the config file, so `machines` must be
+                        // reachable from here or one click would lock it out.
+                        crate::config::AgentPanelSortConfig::Priority
+                            if self.endpoints.len() > 1 =>
+                        {
+                            crate::config::AgentPanelSortConfig::Machines
+                        }
+                        crate::config::AgentPanelSortConfig::Priority
+                        | crate::config::AgentPanelSortConfig::Machines => {
                             crate::config::AgentPanelSortConfig::Spaces
                         }
                     };

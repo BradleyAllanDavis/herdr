@@ -399,6 +399,8 @@ impl<'de> Deserialize<'de> for SpaceSidebarToken {
 }
 
 type AgentSidebarRows = Vec<Vec<AgentSidebarToken>>;
+/// A single optional `machine` token (documented as one token, not an enum choice).
+type MachineHeaderToken = Option<AgentSidebarToken>;
 type SpaceSidebarRows = Vec<Vec<SpaceSidebarToken>>;
 
 fn deserialize_rows_by_agent<'de, D>(
@@ -427,6 +429,32 @@ pub struct AgentsSidebarConfig {
     #[serde(default, deserialize_with = "deserialize_rows_by_agent")]
     pub rows_by_agent: BTreeMap<String, AgentSidebarRows>,
     pub row_gap: u16,
+    /// Styling for the per-machine header rows of `agent_panel_sort = "machines"`.
+    /// Must be the `machine` token; its `fg`/`bold`/`dim` and `rules` style the
+    /// machine label. Unset renders the plain label in bold. With more than one
+    /// machine attached, the `fg` a rule gives the active machine also becomes
+    /// the tab bar accent (active tab and pills).
+    #[serde(
+        default,
+        deserialize_with = "deserialize_machine_header",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub machine_header: MachineHeaderToken,
+}
+
+fn deserialize_machine_header<'de, D>(
+    deserializer: D,
+) -> Result<Option<AgentSidebarToken>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let token = AgentSidebarToken::deserialize(deserializer)?;
+    if token.parts().0 != &AgentSidebarToken::Machine {
+        return Err(serde::de::Error::custom(
+            "machine_header must use the `machine` token",
+        ));
+    }
+    Ok(Some(token))
 }
 
 impl AgentsSidebarConfig {
@@ -451,6 +479,7 @@ impl Default for AgentsSidebarConfig {
             ],
             rows_by_agent: BTreeMap::new(),
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
+            machine_header: None,
         }
     }
 }
@@ -623,6 +652,53 @@ rows = [[{ token = "$status", rules = [{ contains = "error", bold = true }] }]]
         let encoded = toml::to_string(&config).unwrap();
         assert!(encoded.contains("rules"));
         assert_eq!(toml::from_str::<SidebarConfig>(&encoded).unwrap(), config);
+    }
+
+    #[test]
+    fn machine_header_defaults_to_unset_and_round_trips_styled_rules() {
+        assert_eq!(SidebarConfig::default().agents.machine_header, None);
+        let default_encoded = toml::to_string(&SidebarConfig::default()).unwrap();
+        assert!(!default_encoded.contains("machine_header"));
+
+        let input = r##"
+[agents]
+machine_header = { token = "machine", bold = false, rules = [{ equals = "dozer", fg = "#dc322f" }, { equals = "Local", fg = "#2aa198", ignore_case = true }] }
+"##;
+        let config: SidebarConfig = toml::from_str(input).expect("machine_header config");
+        let header = config.agents.machine_header.as_ref().unwrap();
+        assert_eq!(header.parts().0, &AgentSidebarToken::Machine);
+        assert_eq!(
+            header.style_for_value("dozer").fg.unwrap().ratatui(),
+            ratatui::style::Color::Rgb(0xdc, 0x32, 0x2f)
+        );
+        assert_eq!(header.style_for_value("dozer").bold, Some(false));
+        assert_eq!(header.style_for_value("tank").fg, None);
+
+        let encoded = toml::to_string(&config).unwrap();
+        assert!(encoded.contains("machine_header"));
+        assert_eq!(toml::from_str::<SidebarConfig>(&encoded).unwrap(), config);
+
+        let plain: SidebarConfig =
+            toml::from_str("[agents]\nmachine_header = \"machine\"").unwrap();
+        assert_eq!(
+            plain.agents.machine_header,
+            Some(AgentSidebarToken::Machine)
+        );
+    }
+
+    #[test]
+    fn machine_header_rejects_other_tokens_and_unknown_fields() {
+        for entry in [
+            "\"workspace\"",
+            "{ token = 'agent', fg = '#fff' }",
+            "{ token = '$custom' }",
+            "{ token = 'machine', underline = true }",
+            "{ token = 'machine', rules = [{ bold = true }] }",
+            "{ token = 'machine', fg = 'red' }",
+        ] {
+            let input = format!("[agents]\nmachine_header = {entry}");
+            assert!(toml::from_str::<SidebarConfig>(&input).is_err(), "{entry}");
+        }
     }
 
     #[test]
