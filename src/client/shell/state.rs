@@ -104,6 +104,9 @@ pub(crate) struct ClientShellConfig {
     pub(super) switch_ascii_input_source_in_prefix: bool,
     pub(super) local_config_path: std::path::PathBuf,
     pub(super) preferences_path: Option<std::path::PathBuf>,
+    /// How the Local endpoint is labelled (`"<host> (local)"`, or `"Local"` when the
+    /// client does not know its hostname).
+    pub(super) local_label: String,
     pub(super) preferences: preferences::ClientChromePreferences,
     pub(super) startup_config_diagnostic: Option<String>,
     pub(super) startup_onboarding: bool,
@@ -1031,6 +1034,7 @@ impl ClientShellState {
         if let Some(sort) = preferences.agent_panel_sort {
             config.agent_panel_sort = sort;
         }
+        let local_label = config.local_label.clone();
         Self {
             config,
             snapshot: None,
@@ -1065,7 +1069,7 @@ impl ClientShellState {
             last_tab_bar_width: None,
             last_composed_size: None,
             hits: ShellHitMap::default(),
-            endpoints: vec![local_endpoint()],
+            endpoints: vec![local_endpoint(&local_label)],
             active_endpoint_id: ClientEndpointId::Local,
             collapsed_endpoints: HashSet::new(),
             mode: ClientShellMode::Terminal,

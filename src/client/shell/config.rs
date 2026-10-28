@@ -139,6 +139,7 @@ impl ClientShellConfig {
                 .switch_ascii_input_source_in_prefix,
             local_config_path: crate::config::config_path(),
             preferences_path: None,
+            local_label: "Local".into(),
             preferences: preferences::ClientChromePreferences::default(),
             startup_config_diagnostic: None,
             startup_onboarding: false,
@@ -158,6 +159,15 @@ impl ClientShellConfig {
     pub(crate) fn with_keybinding_source(mut self, source: ClientShellKeybindingSource) -> Self {
         self.keybinding_source = source;
         self.keybinds.keybinds.custom_commands.clear();
+        self
+    }
+
+    /// Label the Local endpoint `"<host> (local)"` so it reads like the saved
+    /// machines beside it. `machine` rules and `machine_header` rules match this
+    /// full label, so use `starts_with = "<host>"` to cover both the local and
+    /// the remote view of the same machine.
+    pub(crate) fn with_local_hostname(mut self, hostname: Option<&str>) -> Self {
+        self.local_label = super::endpoints::local_endpoint_label(hostname);
         self
     }
 
