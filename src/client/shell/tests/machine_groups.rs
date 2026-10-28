@@ -404,6 +404,62 @@ fn header_fits_narrow_widths_and_truncates_long_labels() {
 }
 
 #[test]
+fn local_endpoint_reads_as_host_local() {
+    use super::super::endpoints::local_endpoint_label;
+    assert_eq!(local_endpoint_label(Some("morpheus")), "morpheus (local)");
+    // Short name only: macOS reports `host.local` or a FQDN.
+    assert_eq!(
+        local_endpoint_label(Some("dozer.lan.example")),
+        "dozer (local)"
+    );
+    assert_eq!(local_endpoint_label(Some("")), "Local");
+    assert_eq!(local_endpoint_label(Some(".local")), "Local");
+    assert_eq!(local_endpoint_label(None), "Local");
+
+    // The label reaches the machines list and the agent panel header, and a
+    // `starts_with` rule on the host name colors it like the remote view would.
+    let config = machines_config(|config| {
+        config.ui.sidebar.agents.machine_header = Some(
+            toml::from_str::<crate::config::SidebarConfig>(
+                r##"[agents]
+machine_header = { token = "machine", rules = [{ starts_with = "morpheus", fg = "#859900" }] }"##,
+            )
+            .unwrap()
+            .agents
+            .machine_header
+            .unwrap(),
+        );
+    })
+    .with_local_hostname(Some("morpheus.local"));
+    let (mut state, _) = federated(
+        config,
+        &[(
+            "tank",
+            '2',
+            true,
+            vec![agent("p1", "tank agent", AgentStatus::Idle, 1)],
+        )],
+        vec![agent("p1", "local agent", AgentStatus::Idle, 1)],
+    );
+    let frame = state.compose(100, 28).expect("frame");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let width = frame.width as usize;
+    let lines = frame_lines(&mut state);
+    assert!(
+        lines.iter().any(|line| line.contains("morpheus (local)")),
+        "machines list: {}",
+        lines.join("\n")
+    );
+    assert!(!lines.iter().any(|line| line.contains("Local")));
+    let row = line_index(&lines, "━━ morpheus (local) ");
+    let column = lines[row].chars().position(|c| c == '━').unwrap();
+    assert_eq!(
+        buffer.content()[row * width + column].fg,
+        ratatui::style::Color::Rgb(0x85, 0x99, 0x00)
+    );
+}
+
+#[test]
 fn header_rule_matches_the_full_label_even_when_truncated() {
     let mut config = Config::default();
     config.ui.sidebar.agents.machine_header = Some(
