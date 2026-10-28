@@ -62,16 +62,33 @@ pub(super) fn render_expanded(
         return;
     }
     let rows = agent_rows(endpoints, active_endpoint_id, config);
+    let entries = list_entries(
+        rows,
+        super::machine_groups::wants_headers(endpoints, config),
+    );
     super::agent_sidebar::render_agent_list(
         buffer,
         area,
-        &rows,
+        &entries,
         agent_view_label.map(|_| " no matching agents"),
         config,
         agent_scroll,
         hits,
-        |row| row.agent.rows.len(),
-        |buffer, rect, row, hits| {
+        |entry| match entry {
+            ListEntry::Header { .. } => 1,
+            ListEntry::Agent(row) => row.agent.rows.len(),
+        },
+        |buffer, rect, entry, hits| {
+            let row = match entry {
+                // Headers register no hit area, so clicks on them fall through.
+                ListEntry::Header { label, stale } => {
+                    super::machine_groups::render_machine_header(
+                        buffer, rect, label, *stale, config,
+                    );
+                    return;
+                }
+                ListEntry::Agent(row) => row,
+            };
             super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, config);
             if row.stale {
                 buffer.set_style(
@@ -85,6 +102,30 @@ pub(super) fn render_expanded(
                 .push((rect, row.endpoint_id.clone(), row.agent.pane_id.clone()));
         },
     );
+}
+
+/// One entry of the expanded agent list: a machine header or an agent.
+enum ListEntry {
+    Header { label: String, stale: bool },
+    Agent(EndpointAgentRow),
+}
+
+/// Wrap rows as list entries, opening a header whenever the endpoint changes.
+/// Rows of one endpoint are contiguous in every sort that asks for headers.
+fn list_entries(rows: Vec<EndpointAgentRow>, headers: bool) -> Vec<ListEntry> {
+    let mut entries = Vec::with_capacity(rows.len());
+    let mut previous: Option<ClientEndpointId> = None;
+    for row in rows {
+        if headers && previous.as_ref() != Some(&row.endpoint_id) {
+            previous = Some(row.endpoint_id.clone());
+            entries.push(ListEntry::Header {
+                label: row.machine_label.clone(),
+                stale: row.stale,
+            });
+        }
+        entries.push(ListEntry::Agent(row));
+    }
+    entries
 }
 
 struct EndpointAgentRow {

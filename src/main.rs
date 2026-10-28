@@ -334,7 +334,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Set to "" to leave the outer terminal title alone.
 # window_title = "{hostname}: {workspace}"
 
-# Agent panel ordering: "spaces" (grouped by space) or "priority" (attention queue).
+# Agent panel ordering: "spaces" (grouped by space), "priority" (attention queue),
+# or "machines" (federated clients: one header per machine, priority within each).
 # "workspaces" is accepted as an alias for "spaces".
 # agent_panel_sort = "spaces"
 

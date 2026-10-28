@@ -220,7 +220,10 @@ fn agent_panel_sort_from_config(
 ) -> state::AgentPanelSort {
     match sort {
         crate::config::AgentPanelSortConfig::Spaces => state::AgentPanelSort::Spaces,
-        crate::config::AgentPanelSortConfig::Priority => state::AgentPanelSort::Priority,
+        // `machines` only changes how a federated client groups rows; one
+        // server's own ordering is the priority ordering.
+        crate::config::AgentPanelSortConfig::Priority
+        | crate::config::AgentPanelSortConfig::Machines => state::AgentPanelSort::Priority,
     }
 }
 

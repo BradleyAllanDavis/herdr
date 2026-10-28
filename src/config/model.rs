@@ -99,6 +99,16 @@ pub enum AgentPanelSortConfig {
     #[serde(alias = "workspaces")]
     Spaces,
     Priority,
+    /// Federated clients group rows per machine, ordered by priority inside
+    /// each group. With a single machine this behaves exactly like `Priority`.
+    Machines,
+}
+
+impl AgentPanelSortConfig {
+    /// Whether a single machine's agents are ordered by status priority.
+    pub fn sorts_by_priority(self) -> bool {
+        matches!(self, Self::Priority | Self::Machines)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -1458,6 +1468,16 @@ agent_panel_scope = "current"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.ui.agent_panel_sort, AgentPanelSortConfig::Spaces);
+    }
+
+    #[test]
+    fn agent_panel_sort_parses_machines_and_orders_by_priority() {
+        let config: Config = toml::from_str("[ui]\nagent_panel_sort = \"machines\"\n").unwrap();
+        assert_eq!(config.ui.agent_panel_sort, AgentPanelSortConfig::Machines);
+        assert!(AgentPanelSortConfig::Machines.sorts_by_priority());
+        assert!(AgentPanelSortConfig::Priority.sorts_by_priority());
+        assert!(!AgentPanelSortConfig::Spaces.sorts_by_priority());
+        assert!(toml::from_str::<Config>("[ui]\nagent_panel_sort = \"hosts\"\n").is_err());
     }
 
     #[test]

@@ -286,6 +286,11 @@ pub(super) fn render_shell(
         }
     }
     if layout.tab_bar.height > 0 {
+        let accent = super::machine_groups::active_machine_accent(
+            state.endpoints,
+            config,
+            super::endpoint_sidebar::active_endpoint_label(&state),
+        );
         render_tab_bar(
             buffer,
             layout.tab_bar,
@@ -294,6 +299,7 @@ pub(super) fn render_shell(
             state.tab_scroll,
             state.reveal_focused_tab,
             state.tab_drag_insert_index,
+            accent,
             &mut hits,
         );
     }

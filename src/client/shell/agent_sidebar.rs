@@ -35,7 +35,7 @@ pub(super) fn ordered_agent_pane_ids(
             .collect();
     }
     let mut agents = snapshot.agents.iter().collect::<Vec<_>>();
-    if sort == crate::config::AgentPanelSortConfig::Priority {
+    if sort.sorts_by_priority() {
         agents.sort_by_key(|agent| {
             (
                 std::cmp::Reverse(status_priority(agent.agent_status)),
@@ -121,6 +121,7 @@ pub(super) fn render_agent_panel_header(
     let sort_label = agent_view_label.unwrap_or(match config.agent_panel_sort {
         crate::config::AgentPanelSortConfig::Spaces => "grouped",
         crate::config::AgentPanelSortConfig::Priority => "priority",
+        crate::config::AgentPanelSortConfig::Machines => "machines",
     });
     let sort_width = display_width(sort_label).min(area.width as usize) as u16;
     let sort_rect = Rect::new(
