@@ -18,6 +18,13 @@ use serde::{Deserialize, Serialize};
 
 /// Current protocol version. Bumped when wire format changes incompatibly.
 ///
+/// 24 (personal fork only): rebase onto upstream v0.9.5, which appended
+/// `ClientInputEvent::HostDefaultColor` and kept upstream's own number at 22.
+/// A 0.9.0-based fork server (23) cannot decode that variant, so a v0.9.5
+/// client attached to it would send it and fail mid-session; bumping makes the
+/// handshake reject the pairing up front instead. Client and server must be on
+/// the same build.
+///
 /// 23: added `volume: Option<u8>` to `SemanticNotification` and
 /// `ServerMessage::Notify`. `#[serde(default)]` does NOT make this backward
 /// compatible at the byte level the way it would for a self-describing
@@ -30,7 +37,7 @@ use serde::{Deserialize, Serialize};
 /// below. Real cross-version tolerance for this wire is the version check
 /// itself (`check_client_version`): any mismatch is rejected outright at
 /// handshake with a clear error, not a silent partial decode.
-pub const PROTOCOL_VERSION: u32 = 23;
+pub const PROTOCOL_VERSION: u32 = 24;
 
 /// Maximum allowed frame payload size (2 MB). Frames larger than this are
 /// rejected to prevent denial-of-service via oversized length prefixes.
