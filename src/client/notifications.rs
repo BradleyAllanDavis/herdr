@@ -175,22 +175,6 @@ pub(super) fn handle_notify(
     );
 }
 
-/// The platform helper blocks on an external program (`terminal-notifier` /
-/// `osascript` / `notify-send`), so run it off the input/render thread —
-/// same as sound playback — or the whole client freezes while it runs.
-fn show_desktop_notification_in_background(title: String, body: Option<String>) {
-    let spawned = std::thread::Builder::new()
-        .name("system-notify".into())
-        .spawn(move || {
-            if let Err(err) = crate::platform::show_desktop_notification(&title, body.as_deref()) {
-                warn!(err = %err, "failed to emit system notification");
-            }
-        });
-    if let Err(err) = spawned {
-        warn!(err = %err, "failed to spawn system notification thread");
-    }
-}
-
 pub(super) fn handle_notify_with_notifiers(
     kind: NotifyKind,
     message: &str,

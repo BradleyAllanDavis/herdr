@@ -668,11 +668,11 @@ machine_header = { token = "machine", bold = false, rules = [{ equals = "dozer",
         let header = config.agents.machine_header.as_ref().unwrap();
         assert_eq!(header.parts().0, &AgentSidebarToken::Machine);
         assert_eq!(
-            header.style_for_value("dozer").fg.unwrap().ratatui(),
+            header.style_for_value("dozer").unwrap().fg.unwrap().ratatui(),
             ratatui::style::Color::Rgb(0xdc, 0x32, 0x2f)
         );
-        assert_eq!(header.style_for_value("dozer").bold, Some(false));
-        assert_eq!(header.style_for_value("tank").fg, None);
+        assert_eq!(header.style_for_value("dozer").unwrap().bold, Some(false));
+        assert_eq!(header.style_for_value("tank").unwrap().fg, None);
 
         let encoded = toml::to_string(&config).unwrap();
         assert!(encoded.contains("machine_header"));

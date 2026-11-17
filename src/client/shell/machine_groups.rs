@@ -55,9 +55,13 @@ fn header_style(config: &ClientShellConfig, label: &str, stale: bool) -> Style {
     let base = Style::default()
         .fg(config.palette.subtext0)
         .add_modifier(Modifier::BOLD);
-    config.agents.machine_header.as_ref().map_or(base, |token| {
-        crate::ui::apply_token_style(base, token.style_for_value(label))
-    })
+    // `None` is a `hide` rule, which has no meaning for a header: keep the base style.
+    config
+        .agents
+        .machine_header
+        .as_ref()
+        .and_then(|token| token.style_for_value(label))
+        .map_or(base, |style| crate::ui::apply_token_style(base, style))
 }
 
 /// Accent for the tab bar (active tab and status pills) while `label` is the
@@ -75,7 +79,7 @@ pub(super) fn active_machine_accent(
         return None;
     }
     let token = config.agents.machine_header.as_ref()?;
-    Some(token.style_for_value(label).fg?.ratatui())
+    Some(token.style_for_value(label)?.fg?.ratatui())
 }
 
 /// Draw `━━ label ━━━━━` across one row, styled by `[ui.sidebar.agents] machine_header`.
