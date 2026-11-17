@@ -101,6 +101,7 @@ fn line_index(lines: &[String], needle: &str) -> usize {
 fn order(state: &ClientShellState) -> Vec<(String, String)> {
     super::super::aggregate_navigation::aggregate_agent_rows(
         &state.endpoints,
+        &state.active_endpoint_id,
         state.config.agent_panel_sort,
     )
     .into_iter()
@@ -298,6 +299,7 @@ fn navigation_skips_headers_and_follows_group_order() {
     );
     let targets = super::super::aggregate_navigation::online_agent_targets(
         &state.endpoints,
+        &state.active_endpoint_id,
         AgentPanelSortConfig::Machines,
     );
     // Only online agents, in display order, with no entry for header rows.

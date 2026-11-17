@@ -158,6 +158,7 @@ fn notifications_and_clipboard_feedback_only_cover_their_drawn_corners() {
                     title: "notice".into(),
                     body: Some("body".into()),
                     sound: None,
+                    volume: None,
                     agent: None,
                     workspace_id: None,
                     tab_id: None,
