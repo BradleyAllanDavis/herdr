@@ -161,7 +161,7 @@ enum ListEntry {
 /// (true for the `machines` sort); an agent view with its own sort can
 /// interleave machines, and a header per run would then repeat a machine.
 fn list_entries(rows: Vec<EndpointAgentRow>, headers: bool) -> Vec<ListEntry> {
-    let headers = headers && endpoints_are_contiguous(&rows);
+    let headers = headers && endpoints_are_contiguous(rows.iter().map(|row| &row.endpoint_id));
     let mut entries = Vec::with_capacity(rows.len());
     let mut previous: Option<ClientEndpointId> = None;
     for row in rows {
@@ -177,68 +177,48 @@ fn list_entries(rows: Vec<EndpointAgentRow>, headers: bool) -> Vec<ListEntry> {
     entries
 }
 
-fn endpoints_are_contiguous(rows: &[EndpointAgentRow]) -> bool {
+fn endpoints_are_contiguous<'a>(ids: impl Iterator<Item = &'a ClientEndpointId>) -> bool {
     let mut seen: Vec<&ClientEndpointId> = Vec::new();
-    for row in rows {
+    for id in ids {
         match seen.last() {
-            Some(last) if *last == &row.endpoint_id => {}
-            _ if seen.contains(&&row.endpoint_id) => return false,
-            _ => seen.push(&row.endpoint_id),
+            Some(last) if *last == id => {}
+            _ if seen.contains(&id) => return false,
+            _ => seen.push(id),
         }
     }
     true
 }
 
-struct EndpointAgentRow {
-    endpoint_id: ClientEndpointId,
-    machine_label: String,
-    stale: bool,
-    agent: super::agent_sidebar::AgentRow,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn agent_rows(
-    endpoints: &[ClientShellEndpoint],
-    active_endpoint_id: &ClientEndpointId,
-    config: &ClientShellConfig,
-) -> Vec<EndpointAgentRow> {
-    let mut rendered_rows = endpoints
-        .iter()
-        .filter_map(|endpoint| {
-            endpoint.snapshot.as_deref().map(|snapshot| {
-                snapshot
-                    .agents
-                    .iter()
-                    .filter_map(|agent| {
-                        super::agent_sidebar::agent_row(
-                            snapshot,
-                            &agent.pane_id,
-                            config,
-                            Some(&endpoint.label),
-                        )
-                    })
-                    .map(|agent| ((endpoint.endpoint_id.clone(), agent.pane_id.clone()), agent))
-                    .collect::<Vec<_>>()
-            })
-        })
-        .flatten()
-        .collect::<HashMap<_, _>>();
+    fn ssh(id: &str) -> ClientEndpointId {
+        ClientEndpointId::Ssh(crate::client::endpoint::ProfileId::parse(id).unwrap())
+    }
 
-    super::aggregate_navigation::aggregate_agent_rows(
-        endpoints,
-        active_endpoint_id,
-        config.agent_panel_sort,
-    )
-    .into_iter()
-    .filter_map(|row| {
-        let key = (row.endpoint.endpoint_id.clone(), row.agent.pane_id.clone());
-        let mut agent = rendered_rows.remove(&key)?;
-        agent.focused &= row.endpoint.endpoint_id == active_endpoint_id;
-        Some(EndpointAgentRow {
-            endpoint_id: row.endpoint.endpoint_id.clone(),
-            machine_label: row.endpoint.label.to_owned(),
-            stale: row.endpoint.stale(),
-            agent,
-        })
-    })
-    .collect()
+    #[test]
+    fn endpoints_are_contiguous_accepts_one_run_per_endpoint() {
+        let a = ssh("0123456789abcdef0123456789abcdef");
+        let ids = [
+            ClientEndpointId::Local,
+            ClientEndpointId::Local,
+            a.clone(),
+            a,
+        ];
+        assert!(endpoints_are_contiguous(ids.iter()));
+        assert!(endpoints_are_contiguous([].iter()));
+    }
+
+    #[test]
+    fn endpoints_are_contiguous_rejects_an_interleaved_endpoint() {
+        // An agent view with its own sort can put Local, remote, Local: a
+        // header per run would then name Local twice.
+        let ids = [
+            ClientEndpointId::Local,
+            ssh("0123456789abcdef0123456789abcdef"),
+            ClientEndpointId::Local,
+        ];
+        assert!(!endpoints_are_contiguous(ids.iter()));
+    }
 }
