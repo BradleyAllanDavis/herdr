@@ -311,6 +311,13 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Keep split panes visually separated instead of sharing divider borders.
 # pane_gaps = true
 
+# Center a tab's only pane at this percent of the tab width (50 = the width a
+# pane gets in a two-pane split). A second pane fills side by side as usual.
+# 0 (or 100+) keeps a lone pane full width. Applies to this machine's server.
+# single_pane_width_percent = 0
+# Only center when the tab is at least this many columns wide.
+# single_pane_center_min_cols = 0
+
 # Border weight for the focused pane: "single" matches unfocused panes, "thick"
 # uses heavy box-drawing characters so the active pane stands out by shape, not
 # just accent color.

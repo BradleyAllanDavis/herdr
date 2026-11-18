@@ -1013,6 +1013,11 @@ pub struct UiConfig {
     pub pane_scrollbars: bool,
     /// Keep split panes visually separated instead of sharing divider borders. Default: true.
     pub pane_gaps: bool,
+    /// Width of a tab's only pane as a percentage of the tab, centered, so a lone
+    /// pane reads like one half of a split (50). 0 or 100+ fills the tab. Default: 0.
+    pub single_pane_width_percent: u8,
+    /// Only center a lone pane when the tab is at least this many columns wide. Default: 0.
+    pub single_pane_center_min_cols: u16,
     /// Border weight for the focused pane. Default: single.
     pub focused_pane_border_style: FocusedPaneBorderStyleConfig,
     /// Show agent labels in split pane borders when no manual pane label is set. Default: false.
@@ -1256,6 +1261,8 @@ impl Default for UiConfig {
             pane_outer_borders: true,
             pane_scrollbars: true,
             pane_gaps: true,
+            single_pane_width_percent: 0,
+            single_pane_center_min_cols: 0,
             focused_pane_border_style: FocusedPaneBorderStyleConfig::Single,
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
@@ -1574,6 +1581,8 @@ status_indicators = "symbols"
         assert!(default_config.ui.pane_outer_borders);
         assert!(default_config.ui.pane_scrollbars);
         assert!(default_config.ui.pane_gaps);
+        assert_eq!(default_config.ui.single_pane_width_percent, 0);
+        assert_eq!(default_config.ui.single_pane_center_min_cols, 0);
         assert_eq!(
             default_config.ui.focused_pane_border_style,
             FocusedPaneBorderStyleConfig::Single
@@ -1593,6 +1602,8 @@ pane_borders = "always"
 pane_outer_borders = false
 pane_scrollbars = false
 pane_gaps = true
+single_pane_width_percent = 50
+single_pane_center_min_cols = 120
 focused_pane_border_style = "thick"
 show_agent_labels_on_pane_borders = true
 hide_tab_bar_when_single_tab = true
@@ -1611,6 +1622,8 @@ tab_bar_right_separator = " · "
         assert!(!config.ui.pane_outer_borders);
         assert!(!config.ui.pane_scrollbars);
         assert!(config.ui.pane_gaps);
+        assert_eq!(config.ui.single_pane_width_percent, 50);
+        assert_eq!(config.ui.single_pane_center_min_cols, 120);
         assert_eq!(
             config.ui.focused_pane_border_style,
             FocusedPaneBorderStyleConfig::Thick

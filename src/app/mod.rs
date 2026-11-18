@@ -425,6 +425,10 @@ impl App {
     ) -> std::io::Result<Self> {
         let prefix_keys = config.prefix_keys();
         crate::kitty_graphics::set_enabled(config.kitty_graphics_enabled());
+        crate::layout::set_single_pane_centering(
+            config.ui.single_pane_width_percent,
+            config.ui.single_pane_center_min_cols,
+        );
         let (event_tx, event_rx) = mpsc::channel::<AppEvent>(APP_EVENT_CHANNEL_CAPACITY);
         let render_notify = Arc::new(Notify::new());
         let render_dirty = Arc::new(crate::render_signal::RenderSignal::new());
@@ -966,6 +970,10 @@ impl App {
                 self.state.pane_outer_borders = config.ui.pane_outer_borders;
                 self.state.pane_scrollbars = config.ui.pane_scrollbars;
                 self.state.pane_gaps = config.ui.pane_gaps;
+                crate::layout::set_single_pane_centering(
+                    config.ui.single_pane_width_percent,
+                    config.ui.single_pane_center_min_cols,
+                );
                 self.state.focused_pane_border_style = config.ui.focused_pane_border_style;
                 self.state.show_agent_labels_on_pane_borders =
                     config.ui.show_agent_labels_on_pane_borders;

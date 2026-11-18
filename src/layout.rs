@@ -29,6 +29,57 @@ impl PaneId {
     }
 }
 
+/// `ui.single_pane_width_percent`: width of a lone pane as a percentage of its
+/// tab, centered. 0 disables. Kept in atomics so the ~dozen `TileLayout::panes`
+/// callers need no extra argument; written when the config loads or reloads.
+/// Process-global and read only while laying out on the app thread, so a reload
+/// can at worst mix old and new values for one frame. Tests must call
+/// `panes_centering` with explicit values instead of setting these.
+static SINGLE_PANE_WIDTH_PERCENT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+/// `ui.single_pane_center_min_cols`: only center when the tab is at least this wide.
+static SINGLE_PANE_CENTER_MIN_COLS: std::sync::atomic::AtomicU16 =
+    std::sync::atomic::AtomicU16::new(0);
+
+/// Apply the `ui.single_pane_*` settings; called on config load and reload.
+pub fn set_single_pane_centering(percent: u8, min_cols: u16) {
+    use std::sync::atomic::Ordering::Relaxed;
+    SINGLE_PANE_WIDTH_PERCENT.store(percent, Relaxed);
+    SINGLE_PANE_CENTER_MIN_COLS.store(min_cols, Relaxed);
+}
+
+fn single_pane_centering() -> (u8, u16) {
+    use std::sync::atomic::Ordering::Relaxed;
+    (
+        SINGLE_PANE_WIDTH_PERCENT.load(Relaxed),
+        SINGLE_PANE_CENTER_MIN_COLS.load(Relaxed),
+    )
+}
+
+/// Narrow `area` to `percent` of its width and center it, so a lone pane gets
+/// the width a pane has in a two-pane split (`percent` 50). Returns `area`
+/// unchanged when `percent` is 0 or at least 100, or the area is narrower than
+/// `min_cols`.
+pub fn center_lone_pane(area: Rect, percent: u8, min_cols: u16) -> Rect {
+    if percent == 0 || percent >= 100 || area.width == 0 || area.width < min_cols {
+        return area;
+    }
+    // Same rounding as `split_rect`, so 50 matches a 50/50 split exactly.
+    let scaled = (u32::from(area.width) * u32::from(percent) + 50) / 100;
+    let width = u16::try_from(scaled).map_or(area.width, |w| w.clamp(1, area.width));
+    Rect::new(
+        area.x + (area.width - width) / 2,
+        area.y,
+        width,
+        area.height,
+    )
+}
+
+/// Area a lone pane occupies in `area` under the current settings.
+pub(crate) fn lone_pane_area(area: Rect) -> Rect {
+    let (percent, min_cols) = single_pane_centering();
+    center_lone_pane(area, percent, min_cols)
+}
+
 /// Snapshot of a pane's position and focus state after layout.
 #[derive(Clone)]
 pub struct PaneInfo {
@@ -122,8 +173,23 @@ impl TileLayout {
         count_panes(&self.root)
     }
 
-    /// Compute rects for all panes given the available area.
+    /// Compute rects for all panes given the available area. A lone pane is
+    /// narrowed and centered per `ui.single_pane_width_percent`.
     pub fn panes(&self, area: Rect) -> Vec<PaneInfo> {
+        let (percent, min_cols) = single_pane_centering();
+        self.panes_centering(area, percent, min_cols)
+    }
+
+    fn panes_centering(&self, area: Rect, percent: u8, min_cols: u16) -> Vec<PaneInfo> {
+        let area = match self.root {
+            Node::Pane(_) => center_lone_pane(area, percent, min_cols),
+            Node::Split { .. } => area,
+        };
+        self.panes_unnarrowed(area)
+    }
+
+    /// Pane rects tiling `area` exactly, with no lone-pane centering.
+    fn panes_unnarrowed(&self, area: Rect) -> Vec<PaneInfo> {
         let mut result = Vec::new();
         collect_panes(&self.root, area, self.focus, &mut result);
         result
@@ -131,7 +197,9 @@ impl TileLayout {
 
     /// Compute pane rects as they will be after splitting `target`, without
     /// changing the layout. Returns the rects and the new pane's index; the
-    /// new pane's entry carries `target`'s id.
+    /// new pane's entry carries `target`'s id. Starts from the un-narrowed
+    /// `area`: once split, the panes fill it, so a lone pane's centering must
+    /// not shrink the new pane's initial size.
     pub fn panes_after_split(
         &self,
         area: Rect,
@@ -139,7 +207,7 @@ impl TileLayout {
         direction: Direction,
         ratio: f32,
     ) -> Option<(Vec<PaneInfo>, usize)> {
-        let mut panes = self.panes(area);
+        let mut panes = self.panes_unnarrowed(area);
         let index = panes.iter().position(|info| info.id == target)?;
         let (first, second) = split_rect(panes[index].rect, direction, valid_split_ratio(ratio));
         panes[index].rect = first;
@@ -959,6 +1027,58 @@ mod tests {
                 (Direction::Vertical, 0.4),
                 (Direction::Horizontal, 0.5)
             ]
+        );
+    }
+
+    #[test]
+    fn center_lone_pane_matches_a_half_split_and_centers() {
+        let area = Rect::new(4, 2, 101, 30);
+        let lone = center_lone_pane(area, 50, 0);
+        let (half, _) = split_rect(area, Direction::Horizontal, 0.5);
+        assert_eq!(lone.width, half.width);
+        assert_eq!((lone.y, lone.height), (area.y, area.height));
+        assert_eq!(lone.x - area.x, area.x + area.width - (lone.x + lone.width));
+
+        let narrow = center_lone_pane(Rect::new(0, 0, 100, 10), 40, 0);
+        assert_eq!((narrow.x, narrow.width), (30, 40));
+    }
+
+    #[test]
+    fn center_lone_pane_is_off_for_zero_full_and_narrow_tabs() {
+        let area = Rect::new(1, 1, 80, 24);
+        assert_eq!(center_lone_pane(area, 0, 0), area);
+        assert_eq!(center_lone_pane(area, 100, 0), area);
+        assert_eq!(center_lone_pane(area, 200, 0), area);
+        assert_eq!(center_lone_pane(area, 50, 81), area);
+        assert_eq!(center_lone_pane(area, 50, 80).width, 40);
+        let empty = Rect::new(0, 0, 0, 5);
+        assert_eq!(center_lone_pane(empty, 50, 0), empty);
+        assert_eq!(center_lone_pane(Rect::new(0, 0, 1, 5), 1, 0).width, 1);
+    }
+
+    #[test]
+    fn only_a_lone_pane_is_centered_and_a_split_fills_the_tab() {
+        let area = Rect::new(0, 0, 100, 30);
+        let (mut layout, root) = TileLayout::new();
+        let lone = layout.panes_centering(area, 50, 0);
+        assert_eq!(lone[0].rect, Rect::new(25, 0, 50, 30));
+
+        // The pane a split would create is sized from the full tab, not the
+        // narrowed lone pane, and matches what the real split lays out.
+        let (predicted, _) = layout
+            .panes_after_split(area, root, Direction::Horizontal, 0.5)
+            .unwrap();
+        assert_eq!(predicted[0].rect, Rect::new(0, 0, 50, 30));
+        assert_eq!(predicted[1].rect, Rect::new(50, 0, 50, 30));
+        layout.split_pane(root, Direction::Horizontal, 0.5).unwrap();
+        let split: Vec<_> = layout
+            .panes_centering(area, 50, 0)
+            .into_iter()
+            .map(|info| info.rect)
+            .collect();
+        assert_eq!(
+            split,
+            predicted.iter().map(|info| info.rect).collect::<Vec<_>>()
         );
     }
 

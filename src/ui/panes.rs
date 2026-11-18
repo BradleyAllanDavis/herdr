@@ -93,7 +93,12 @@ pub(crate) fn new_pane_terminal_size(
         pane_inner_rect(infos[index].rect, infos[index].borders)
     };
     // A lone pane has no neighbors, so its chrome matches a zoomed single pane.
-    let alone = || pane_inner_rect(area, zoomed_pane_borders(app, false));
+    let alone = || {
+        pane_inner_rect(
+            crate::layout::lone_pane_area(area),
+            zoomed_pane_borders(app, false),
+        )
+    };
     let tab_for = |ws_idx: usize, pane: PaneId| {
         let ws = app.workspaces.get(ws_idx)?;
         ws.tabs.get(ws.find_tab_index_for_pane(pane)?)

@@ -1006,6 +1006,18 @@
           "description": "Keep split panes visually separated instead of sharing divider borders."
         },
         {
+          "key": "ui.single_pane_width_percent",
+          "type": "integer",
+          "default": "0",
+          "description": "Center a tab's only pane at this percent of the tab width; 50 matches the width a pane gets in a two-pane split, and a second pane fills side by side as usual. 0 or 100 and above keep a lone pane full width. Applies to the server this config belongs to."
+        },
+        {
+          "key": "ui.single_pane_center_min_cols",
+          "type": "integer",
+          "default": "0",
+          "description": "Only center a lone pane when the tab is at least this many columns wide. 0 always centers."
+        },
+        {
           "key": "ui.show_agent_labels_on_pane_borders",
           "type": "boolean",
           "default": "false",
